@@ -50,30 +50,26 @@ contains
   subroutine set_model_params(lam,m2)
     real(dl), intent(in) :: m2, lam
     lambda = lam;
-    if (lam > 1._dl) then   ! Temporary hack for coding assignment
-       m2eff = m2*(-1._dl+lambda**2)
-    else
-       m2eff = m2
-    endif
+    m2eff = 2._dl*(1._dl-lambda)  ! check this
   end subroutine set_model_params
 
   real(dl) elemental function v(phi)
     real(dl), intent(in) :: phi
-    v = cos(phi) + 0.5_dl*lambda**2*sin(phi)**2 - 1._dl
+    v = 0.25_dl*(phi**2-1._dl)**2 + lambda*(phi**3/3._dl - phi + 2._dl/3._dl)
   end function v
 
   real(dl) elemental function vp(phi)
     real(dl), intent(in) :: phi
-    vp = -sin(phi) + 0.5_dl*lambda**2*sin(2._dl*phi)
+    vp = (phi**2-1._dl)*(phi+lambda)
   end function vp
 
   real(dl) elemental function vpp(phi)
     real(dl), intent(in) :: phi
-    vpp = -cos(phi) + lambda**2*cos(2._dl*phi)
+    vpp = 3._dl*phi**2 - 1._dl + 2._dl*lambda*phi
   end function vpp
   
   real(dl) function phi_fv()
-    phi_fv = 0._dl !0.5_dl*twopi
+    phi_fv = -1._dl
   end function phi_fv
 
   !>@brief
@@ -87,7 +83,7 @@ contains
 #endif
     yp(TIND) = 1._dl  ! Uncomment to track time as a variable
     yp(FLD) = yc(DFLD)
-    yp(DFLD) = -( -sin(yc(FLD)) + 0.5_dl*lambda**2*sin(2._dl*yc(FLD)) )
+    yp(DFLD) = -(yc(FLD)**2-1._dl)*(yc(FLD)+lambda)
     
 #ifdef DIFF
 #ifdef DISCRETE

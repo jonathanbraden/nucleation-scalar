@@ -39,7 +39,8 @@ contains
     enddo
     spec = 0._dl
 
-    select case (type)  ! To Do: Add higher-order high-T corrections
+    ! TO DO : Add higher-order T corrections
+    select case (type) 
        case (1)  ! Vacuum fluctuations
           spec(2:) = norm / w2eff(2:)**0.25 / sqrt(2._dl)
        case (2)  ! Thermal + Vacuum

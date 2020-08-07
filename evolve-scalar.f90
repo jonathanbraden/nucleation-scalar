@@ -20,6 +20,7 @@ program Scalar_1D
 
   real(dl) :: alph, t_cross
   integer :: n_cross
+  integer :: nSamp
   
   type SimParams
      real(dl) :: dx, dt, dtout
@@ -33,27 +34,67 @@ program Scalar_1D
   type(ScalarLattice) :: simulation
 
 ! What needs fixing, set phi0 out here, allow m^2 to vary from vacuum value, etc.
-
+!  call set_lattice_params(1024,50._dl,1)
+!  call set_model_params(0.5_dl,1._dl)  ! A default for the double well
   call set_lattice_params(1024,50._dl,1)
-!  call set_model_params(0.5_dl,100._dl)  ! A default for the double well
-  call set_model_params(1.2_dl,1._dl)
-  
+  call set_model_params(1.2_dl,1._dl)  ! existing drummond
+ 
   fld(1:nLat,1:2) => yvec(1:2*nLat*nFld)
   time => yvec(2*nLat*nFld+1)
-  alph = 4._dl; n_cross = 4
+  alph = 4._dl; n_cross = 1
 
-  call initialize_rand(87,18)  ! Seed for random field generation.  Adjust to make a new field realisation
+!#ifdef NEW_RUN
+  call initialize_rand(87,18)  ! Seed for random field generation.
   call setup(nVar)
-
-  do i=1,1
-     call initialise_fields(fld,nLat/4+1,0.25*twopi)
+  
+  nSamp = 1
+  do i=1,nSamp
+     !call initialise_fields(fld,nLat/4+1,3.6_dl) ! starting point for double well
+     call initialise_fields(fld,nLat/4+1,0.28_dl*twopi) ! starting point for Drummond
      call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
   enddo
- 
 !  call forward_backward_evolution(0.4_dl/omega,10000,100)
+!#endif
+  
+#ifdef SMOOTH_RUN
+!  call run_instanton()
+  call initialise_from_file('instanton_checkpt.dat',1024)
+  time = 0._dl
+  call setup(nVar)
+  call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+#endif
   
 contains
 
+  !>@brief
+  !> Run a paired simulation consisting of a forward time evolution and
+  !> a backward time evolution from a given field evolution
+  subroutine run_paired_sim(nLat,flip_phi)
+    integer, intent(in) :: nLat  ! see if I need nLat
+    logical, intent(in) :: flip_phi
+    real(dl), dimension(1:nLat,1:2) :: fld0
+
+    call initialize_rand(87,18)  ! Random number seed
+    call setup(nVar)
+    call initialise_fields(fld,nLat/4+1,3.6_dl)
+    fld0(:,:) = fld(:,:)
+    call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+    fld = fld0; time = 0
+    if (flip_phi) then
+       fld(:,1) = -fld(:,1)
+    else
+       fld(:,2) = -fld(:,2)
+    endif
+    call time_evolve(dx/alph,int(alph)*nLat*n_cross,64*n_cross)
+  end subroutine run_paired_sim
+  
+  subroutine run_instanton()
+    call initialise_from_file('instanton_checkpt.dat',1024)
+    time = 0._dl
+    call setup(nVar)
+    call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+  end subroutine run_instanton
+  
   !>@brief
   !> Initialise the integrator, setup FFTW, boot MPI, and perform other necessary setup
   !> before starting the program
@@ -63,13 +104,17 @@ contains
     call initialize_transform_1d(tPair,nLat)  ! nonlocality
   end subroutine setup
 
-  subroutine time_evolve(dt,ns,no)
+  subroutine time_evolve(dt,ns,no,out)
     real(dl), intent(in) :: dt
     integer, intent(in) :: ns, no
+    logical, intent(in), optional :: out
     integer :: i,j, outsize, nums
-    integer :: b_file
+    integer, save :: b_file
+    logical :: o, out_
 
-    open(unit=newunit(b_file),file='bubble-count.dat')
+    out_ = .true.; if (present(out)) out_ = out
+    inquire(opened=o,file='bubble-count.dat')
+    if (.not.o) open(unit=newunit(b_file),file='bubble-count.dat')
     
     print*,"dx is ", dx, "dt is ",dt, "dx/dt is ",dx/dt
     if (dt > dx) print*,"Warning, violating Courant condition"
@@ -81,12 +126,37 @@ contains
        do j=1,outsize
           call gl10(yvec,dt)
        enddo
-       call output_fields(fld)
-       write(b_file,*) count_bubbles(fld(:,1)), mean_cos(fld(:,1))
+       if (out_) call output_fields(fld)
+       !write(b_file,*) count_bubbles(fld(:,1)), mean_cos(fld(:,1))
+       write(b_file,*) time, sum(fld(:,1))/dble(size(fld(:,1))), energy_density(fld)
     enddo
     write(b_file,*)
   end subroutine time_evolve
 
+  function energy_density(fld) result(rho)
+    real(dl), dimension(:,:), intent(in) :: fld
+    real(dl) :: rho(1:2)
+    real(dl), dimension(1:size(fld(:,1))) :: gsq, gsq_fd
+    integer :: nLat
+
+    nLat = size(fld(:,1))
+    gsq_fd(1) = 0.5_dl*( (fld(nLat,1)-fld(1,1))**2+(fld(2,1)-fld(1,1))**2 )
+    gsq_fd(nLat) = 0.5_dl*( (fld(nLat-1,1)-fld(nLat,1))**2+(fld(nLat,1)-fld(1,1))**2  )
+    gsq_fd(2:nLat-1) = 0.5_dl*( (fld(1:nLat-2,1)-fld(2:nLat-1,1))**2+(fld(3:nLat,1)-fld(2:nlat-1,1))**2 )
+    gsq_fd = gsq_fd / dx**2
+#ifdef FOURIER
+    tPair%realSpace(:) = fld(1:nLat,1)
+    call gradsquared_1d_wtype(tPair,dk)
+    gsq(:) = tPair%realSpace(:)
+#else
+    gsq(:) = 0._dl  ! tPair isn't created unless doing Fourier transforms
+#endif
+    
+    rho(1) = 0.5_dl*sum(fld(:,2)**2) + 0.5_dl*sum(gsq) + sum(v(fld(:,1)))
+    rho(2) = 0.5_dl*sum(fld(:,2)**2) + 0.5_dl*sum(gsq_fd) + sum(v(fld(:,1)))
+    rho = rho / dble(nLat)
+  end function energy_density
+  
   subroutine initialise_fields(fld,kmax,phi,klat)
     real(dl), dimension(:,:), intent(inout) :: fld
     integer, intent(in) :: kmax
@@ -237,7 +307,7 @@ contains
     real(dl), dimension(:,:), intent(in) :: fld
     logical :: o; integer :: i
     integer, save :: oFile
-    real(dl), dimension(1:nLat) :: gsq, gsq_fd
+    real(dl), dimension(1:size(fld(:,1))) :: gsq, gsq_fd
 
 !    if (.true.) return
     
@@ -269,7 +339,7 @@ contains
     enddo
     write(oFile,*)
     
-!    print*,"conservation :", sum(0.5_dl*gsq(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2), sum(0.5_dl*gsq_fd(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2) 
+    print*,"conservation :", sum(0.5_dl*gsq(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2), sum(0.5_dl*gsq_fd(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2) 
 
   end subroutine output_fields
 
