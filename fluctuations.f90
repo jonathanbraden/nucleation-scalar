@@ -32,7 +32,9 @@ contains
     kc = size(spec); if (present(klat)) kc = klat
     phiL = twopi; if (present(phi0)) phiL = phi0
 
-    norm = (0.5_dl)**0.5 / phiL / sqrt(len)  ! Check the Box-Mueller normalisation
+    ! Normalise assuming the Box-Mueller transform gives a complex
+    ! random deviate with unit variance
+    norm = (0.5_dl)**0.5 / phiL / sqrt(len)  
 
     do i=1,nn
        w2eff(i) = m2 + (twopi/len)**2*(i-1)**2
@@ -121,7 +123,7 @@ contains
     kc = size(spec); if (present(klat)) kc = klat
     phiL = twopi; if (present(phi0)) phiL = phi0
     
-    norm = (0.5_dl)**0.5 / phiL / sqrt(2._dl) / sqrt(len) ! second factor of 1/sqrt(2) is normalising the Box-Mueller, first one is from 1/sqrt(2\omega)
+    norm = (0.5_dl)**0.5 / phiL / sqrt(len) ! Assumes deviates have unit complex norm
 
     do i=1,nn
        w2eff(i) = m2 + (twopi/len)**2*(i-1)**2
