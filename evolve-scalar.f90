@@ -36,22 +36,23 @@ program Scalar_1D
 ! What needs fixing, set phi0 out here, allow m^2 to vary from vacuum value, etc.
 !  call set_lattice_params(1024,50._dl,1)
 !  call set_model_params(0.5_dl,1._dl)  ! A default for the double well
+
   call set_lattice_params(1024,50._dl,1)
   call set_model_params(1.2_dl,1._dl)  ! existing drummond
  
   fld(1:nLat,1:2) => yvec(1:2*nLat*nFld)
   time => yvec(2*nLat*nFld+1)
-  alph = 4._dl; n_cross = 1
+  alph = 4._dl; n_cross = 4
 
 !#ifdef NEW_RUN
   call initialize_rand(87,18)  ! Seed for random field generation.
   call setup(nVar)
   
-  nSamp = 1
+  nSamp = 2
   do i=1,nSamp
      !call initialise_fields(fld,nLat/4+1,3.6_dl) ! starting point for double well
-     call initialise_fields(fld,nLat/4+1,0.28_dl*twopi) ! starting point for Drummond
-     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+     call initialise_fields(fld,nLat/4+1,0.35*twopi) ! starting point for Drummond
+     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.)
   enddo
 !  call forward_backward_evolution(0.4_dl/omega,10000,100)
 !#endif
@@ -61,7 +62,7 @@ program Scalar_1D
   call initialise_from_file('instanton_checkpt.dat',1024)
   time = 0._dl
   call setup(nVar)
-  call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+  call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.)
 #endif
   
 contains
@@ -69,26 +70,31 @@ contains
   !>@brief
   !> Run a paired simulation consisting of a forward time evolution and
   !> a backward time evolution from a given field evolution
-  subroutine run_paired_sim(nLat,flip_phi)
+  !>
+  !> Current bug: If there's a mean value, then it gets a sign change
+  subroutine run_paired_sims(nLat,flip_phi)
     integer, intent(in) :: nLat  ! see if I need nLat
     logical, intent(in) :: flip_phi
-    real(dl), dimension(1:nLat,1:2) :: fld0
+    real(dl), dimension(1:nLat,1:2) :: dfld0
+    real(dl), dimension(1:2) :: mfld0
 
     call initialize_rand(87,18)  ! Random number seed
     call setup(nVar)
     call initialise_fields(fld,nLat/4+1,3.6_dl)
-    fld0(:,:) = fld(:,:)
+    mfld0 = sum(fld,dim=1)/dble(nLat); dfld0(:,1) = fld(:,1) - mfld0(1); dfld0(:,2) = fld(:,2) - mfld0(2)
+
+    time = 0; 
     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
-    fld = fld0; time = 0
-    if (flip_phi) then
-       fld(:,1) = -fld(:,1)
-    else
-       fld(:,2) = -fld(:,2)
-    endif
-    call time_evolve(dx/alph,int(alph)*nLat*n_cross,64*n_cross)
-  end subroutine run_paired_sim
+    time = 0; fld(:,1) = mfld0(1) + dfld0(:,1); fld(:,2) = mfld0(2) - dfld0(:,2) 
+    call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+    time = 0; fld(:,1) = mfld0(1) - dfld0(:,1); fld(:,2) = mfld0(2) + dfld0(:,2)
+    call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+    time = 0; fld(:,1) = mfld0(1) - dfld0(:,1); fld(:,2) = mfld0(2) - dfld0(:,2)
+    call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+  end subroutine run_paired_sims
   
-  subroutine run_instanton()
+  subroutine run_instanton(scl)
+    real(dl), intent(in) :: scl
     call initialise_from_file('instanton_checkpt.dat',1024)
     time = 0._dl
     call setup(nVar)
@@ -115,20 +121,21 @@ contains
     out_ = .true.; if (present(out)) out_ = out
     inquire(opened=o,file='bubble-count.dat')
     if (.not.o) open(unit=newunit(b_file),file='bubble-count.dat')
-    
-    print*,"dx is ", dx, "dt is ",dt, "dx/dt is ",dx/dt
+    write(b_file,*) "# dx = ",dx,"dt = ",dt
+
     if (dt > dx) print*,"Warning, violating Courant condition"
     
     outsize = ns/no; nums = ns/outsize
     print*,"dt out is ",dt*outsize
-    dt_ = dt; dtout_ = dt*outsize  ! Used here again
+    dt_ = dt; dtout_ = dt*outsize  ! Used here again.  Why do I need to define dt_ and dtout_
     do i=1,nums
        do j=1,outsize
           call gl10(yvec,dt)
        enddo
        if (out_) call output_fields(fld)
-       !write(b_file,*) count_bubbles(fld(:,1)), mean_cos(fld(:,1))
-       write(b_file,*) time, sum(fld(:,1))/dble(size(fld(:,1))), energy_density(fld)
+       !write(b_file,*) time, count_bubbles(fld(:,1)), mean_cos(fld(:,1))
+       write(b_file,*) time, mean_cos(fld(:,1)), energy_density(fld)
+       !write(b_file,*) time, sum(fld(:,1))/dble(size(fld(:,1))), energy_density(fld)
     enddo
     write(b_file,*)
   end subroutine time_evolve
@@ -282,7 +289,7 @@ contains
     fld(:,1) = phi_fv()
     fld(:,2) = 0._dl
   end subroutine initialise_mean_fields
-  
+
   !!!! Fix this thing up
   !>@brief
   !> Initialise the field fluctuations
@@ -339,8 +346,7 @@ contains
     enddo
     write(oFile,*)
     
-    print*,"conservation :", sum(0.5_dl*gsq(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2), sum(0.5_dl*gsq_fd(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2) 
-
+!    print*,"conservation :", sum(0.5_dl*gsq(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2), sum(0.5_dl*gsq_fd(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2) 
   end subroutine output_fields
 
   !>@brief
