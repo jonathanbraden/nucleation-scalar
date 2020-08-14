@@ -1,6 +1,41 @@
 #!/usr/bin/env python
 import numpy as np
 
+# Combined returns to combine various steps in the pipeline
+def create_times(files):
+    d = [read_mean_field(f) for f in files]
+    return [extract_decay_times(tc[:,:,1],thresh=0.5,cut=0.5,interp=True,dt=tc[0,0,0]) for tc in d]
+
+# Move this into plotting file
+def plot_survival(times,f=None,a=None):
+    if f == None:
+        f,a = plt.subplots()
+    a.plot(np.sort(times[0]),survive_prob(times[0],times[1]))
+    return f,a
+
+def lin_fit_times(times,tmin,tmax):
+    """
+    Given a collection of decay times, do a linear fit to
+    the logarithmic survival probability between given times
+    
+    Input
+      times : Times object (first index is array of decay times, 2nd is original number of samples
+      tmin  : minimum time to fit inside
+      tmax  : maximum time to fit inside
+    """
+    t = np.sort(times[0])
+    p = survive_prob(times[0],times[1])
+    ii = np.where( (t>tmin) & (t<tmax) )
+    return np.polyfit(t[ii],p[ii])
+
+def lin_fit_probs(times,pmin,pmax):
+    """
+    """
+    t = np.sort(times[0])
+    p = survive_prob(times[0],times[1])
+    ii = np.where( (p<pmax) & (p>pmin) )
+    return np.polyfit(t[ii],p[ii])
+
 # File reading and manipulation
 def read_mean_field(fName):
     """
@@ -40,7 +75,7 @@ def get_trajectories(files,num_tsteps,ax=1):
     return d
 
 # Need to debug the interpolation subroutine
-def extract_decay_times(time_streams,thresh=-0.8,cut=-0.5,interp=False,up_cross=False,dt=1.,**kwargs):
+def extract_decay_times(time_streams,thresh=0.5,cut=0.5,interp=True,up_cross=False,dt=1.,**kwargs):
     """
     Extract the first crossing of a time-stream past some threshold.
 
@@ -73,9 +108,7 @@ def extract_decay_times(time_streams,thresh=-0.8,cut=-0.5,interp=False,up_cross=
         ti = np.argmax(time_streams[td,:] < thresh,axis=-1)[0]
         
     # This needs to be fixed to work when ti = 0, or fucky slope
-    # Why does this thing fuck up so bad?  Because if I'm using early times, might not have an increasing slope, which will fuck everything up ...
     if interp:
-        #t = ti + np.sign(ti)*(thresh - time_streams[td,ti]) / (time_streams[td,ti] - time_streams[td,ti-1]) # old code.  Not sure why the sign is there
         t = ti + (thresh-time_streams[td,ti]) / (time_streams[td,ti]-time_streams[td,ti-1])
         t = t[0]
     else:
@@ -100,7 +133,7 @@ def survive_prob(t_decay,num_samp):
     These can be plotted as plt.plot(t_sort,prob) to get a survival probability graph.
     """
     frac_remain = float(num_samp-t_decay.size)/float(num_samp)
-    prob = 1.-np.linspace(1./num_samp,1.-frac_remain,t_decay.size,endpoint=True) # Check the boundaries are correct
+    prob = 1.-np.linspace(1./num_samp,1.-frac_remain,t_decay.size,endpoint=True)
     return prob
     
 if __name__=="__main__":
