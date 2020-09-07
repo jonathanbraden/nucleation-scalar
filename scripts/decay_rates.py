@@ -1,15 +1,12 @@
 #!/usr/bin/env python
 import numpy as np
 import matplotlib.pyplot as plt
-<<<<<<< HEAD
-=======
 
 # Convenience for analysis
 # Delete later
 def log_p(tc,ax):
     ax.plot(np.sort(tc[0]),np.log(survive_prob(tc[0],tc[1])))
     return
->>>>>>> 54b21d24f095d3ce5481551a234e56f1d487fbc2
 
 # Combined returns to combine various steps in the pipeline
 def create_times(files):
