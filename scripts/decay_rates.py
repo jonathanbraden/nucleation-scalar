@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Combined returns to combine various steps in the pipeline
 def create_times(files):
@@ -114,6 +115,32 @@ def extract_decay_times(time_streams,thresh=0.5,cut=0.5,interp=True,up_cross=Fal
     else:
         t = ti
     return dt*t, time_streams.shape[0]
+
+def extract_decay_times_full(time_streams,thresh=0.5,cut=0.5,interp=True,up_cross=False,dt=1.,**kwargs):
+    """
+    Extract the decay times, including -1 for undecayed trajectories.
+    This allows a direct comparison between different resolutions using
+    identical initial conditions.
+    """
+    ti = -np.ones(time_streams.shape[0])/dt  # For future normalisation
+    if up_cross:
+        td = np.where(np.max(time_streams[:,:],axis=-1) > cut)
+        ti[td] = np.argmax(time_streams[td,:] > thresh,axis=-1)[0]
+    else:
+        td = np.where(np.min(time_streams[:,:],axis=-1) < cut)
+        ti[td] = np.argmax(time_streams[td,:] < thresh,axis=-1)[0]
+
+    #### Need to add interpolation
+    if interp:
+        print("Interpolation not yet implemented")
+    return dt*ti
+
+def compare_decay_times():
+    """
+    When this is written, I will slice and dice the decay times for identical
+    choices of simulations
+    """
+    return
 
 # To do: Debug more to ensure all offsets are correct.
 # I've done a first go through and I think they're ok
