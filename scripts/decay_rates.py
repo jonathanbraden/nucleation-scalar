@@ -8,11 +8,11 @@ def create_times(files):
     return [extract_decay_times(tc[:,:,1],thresh=0.5,cut=0.5,interp=True,dt=tc[0,0,0]) for tc in d]
 
 # Move this into plotting file
-def plot_survival(times,f=None,a=None):
-    if f == None:
+def plot_survival(times,a=None):
+    if a == None:
         f,a = plt.subplots()
     a.plot(np.sort(times[0]),survive_prob(times[0],times[1]))
-    return f,a
+    return a.get_figure(),a
 
 def lin_fit_times(times,tmin,tmax):
     """
