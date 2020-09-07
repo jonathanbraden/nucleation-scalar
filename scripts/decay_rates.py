@@ -1,5 +1,12 @@
 #!/usr/bin/env python
 import numpy as np
+import matplotlib.pyplot as plt
+
+# Convenience for analysis
+# Delete later
+def log_p(tc,ax):
+    ax.plot(np.sort(tc[0]),np.log(survive_prob(tc[0],tc[1])))
+    return
 
 # Combined returns to combine various steps in the pipeline
 def create_times(files):
@@ -13,7 +20,7 @@ def plot_survival(times,a=None):
     a.plot(np.sort(times[0]),survive_prob(times[0],times[1]))
     return a.get_figure(),a
 
-def lin_fit_times(times,tmin,tmax):
+def lin_fit_times(times,tmin,tmax,o=1):
     """
     Given a collection of decay times, do a linear fit to
     the logarithmic survival probability between given times
@@ -24,17 +31,17 @@ def lin_fit_times(times,tmin,tmax):
       tmax  : maximum time to fit inside
     """
     t = np.sort(times[0])
-    p = survive_prob(times[0],times[1])
+    p = np.log( survive_prob(times[0],times[1]) )
     ii = np.where( (t>tmin) & (t<tmax) )
-    return np.polyfit(t[ii],p[ii])
+    return np.polyfit(t[ii],p[ii],o)
 
 def lin_fit_probs(times,pmin,pmax):
     """
     """
     t = np.sort(times[0])
-    p = survive_prob(times[0],times[1])
+    p = np.survive_prob(times[0],times[1])
     ii = np.where( (p<pmax) & (p>pmin) )
-    return np.polyfit(t[ii],p[ii])
+    return np.polyfit( t[ii],np.log(p[ii]) )
 
 # File reading and manipulation
 def read_mean_field(fName):
@@ -137,4 +144,7 @@ def survive_prob(t_decay,num_samp):
     return prob
     
 if __name__=="__main__":
+    # Temporary to reduce typing
+    with open('files.txt') as f:
+        files = f.read().splitlines()
     pass
