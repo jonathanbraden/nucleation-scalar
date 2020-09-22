@@ -55,19 +55,18 @@ contains
           print*,"Invalid fluctuation choice ",type,".  Defaulting to vacuum."
     end select
 
-    call generate_1dGRF(df,spec(1:kc),.false.)  ! check if this is correct
+    call generate_1dGRF(df,spec(1:km),.false.)  ! check if km is correct
     fld(:,1) = fld(:,1) + df(:)
 
     spec = spec*w2eff**0.5
-    call generate_1dGRF(df,spec(1:kc),.false.)
+    call generate_1dGRF(df,spec(1:km),.false.) ! check if km is correct
     fld(:,2) = fld(:,2) + df(:)
   end subroutine initialize_linear_fluctuations
 
   !>@brief
   !> Initialise fluctuations using eigenmodes of given field profile
   !
-  !> TO DO: I really need the derivative operator, so it's probably better to pass in the full
-  !>        linear operator
+  !> TO DO: I really need the derivative operator, so it's probably better to pass in the full linear operator
   subroutine initialize_fluctuations_eigenmodes(f,L0)
     real(dl), dimension(:,:), intent(in) :: f
     real(dl), dimension(:,:), intent(in) :: L0
@@ -139,7 +138,7 @@ contains
   end subroutine initialize_vacuum_fluctuations
   
   !>@brief
-  !> Initialise Minkowski Gaussian vacuum approximation for fluctuations.
+  !> Initialise Minkowski thermal approximation for fluctuations.
   !> Spectra in this subroutine are truncated for direct comparison of 
   !> fluctuations generated between lattices of varying size.
   !

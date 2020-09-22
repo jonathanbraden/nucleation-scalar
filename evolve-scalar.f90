@@ -220,6 +220,56 @@ contains
   end subroutine resample
   
   !>@brief
+  !> Provide a fluctuation sample only above wavenumber index n_split
+  subroutine sample_high_k_modes(fld,len,m2,temp,type,k_split,kmax,phi0)
+    real(dl), dimension(:,:), intent(inout) :: fld
+    real(dl), intent(in) :: len, m2, temp  ! turn into a "params" vector
+    integer, intent(in) :: type
+    integer, intent(in) :: k_split
+    integer, intent(in), optional :: kmax
+    real(dl), intent(in), optional :: phi0
+
+    real(dl), dimension(1:size(fld(:,1))) :: df
+    real(dl), dimension(1:size(fld(:,1))/2+1) :: spec, w2eff
+    integer :: km, kc; real(dl) :: phiL, norm
+    integer :: i,nn
+
+    nn = size(spec)
+    km = size(spec); if (present(kmax)) km = kmax
+!    kc = size(spec); if (present(klat)) kc = klat  ! Not implemented yet
+    phiL = twopi; if (present(phi0)) phiL = phi0
+
+    norm = (0.5_dl)**0.5 / phiL /sqrt(len)
+    do i=1,nn
+       w2eff(i) = m2 + (twopi/len)**2*(i-1)**2
+    enddo
+    spec = 0._dl
+    select case (type)
+       case (1) ! Vacuum fluctuations
+          spec(k_split:) = norm / w2eff(k_split:)**0.25 / sqrt(2._dl)
+       case (2) ! Thermal + vacuum
+          spec(k_split:) = norm / w2eff(k_split:)**0.25 * sqrt(1._dl/(exp(w2eff(k_split:)**0.5/temp)-1._dl) + 0.5_dl)
+       case (3) ! Only Thermal
+          spec(k_split:) = norm / w2eff(k_split:)**0.25 * sqrt(1._dl/(exp(w2eff(k_split:)**0.5/temp)-1._dl))
+       case (4) ! Leading order high-T approximation
+          spec(k_split:) = norm / w2eff(k_split:)**0.5 * sqrt(temp)
+       case (5) ! White noise
+          spec(k_split:) = 1._dl
+       case default
+          print*,"Invalid fluctuation choice ", type,".  Defaulting to vacuum."
+       end select
+
+       call generate_1dGRF(df,spec(1:kc),.false.)
+       fld(:,1) = fld(:,1) + df(:)
+       
+       spec = spec*w2eff**0.5
+       call generate_1dGRF(df,spec(1:kc),.false.)
+       fld(:,2) = fld(:,2) + df(:)
+    end select
+    
+  end subroutine vary_high_k_modes
+
+  !>@brief
   !> Evolve a collection of ns field trajectories holding the long-wavelength part of the field fixed while varying the short wavelengths
   subroutine vary_high_k_modes(phi_l,ns)
     real(dl), dimension(:,:), intent(in) :: phi_l
