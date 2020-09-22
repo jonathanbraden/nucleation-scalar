@@ -21,12 +21,22 @@ program Scalar_1D
   real(dl) :: alph, t_cross
   integer :: n_cross
   integer :: nSamp
-  
+  real(dl), dimension(:,:), allocatable :: fld_ir
+  integer :: k_ir
+
   type SimParams
-     real(dl) :: dx, dt, dtout
+     real(dl) :: len, dx, dk
      integer :: nLat
+     real(dl) :: alph, dt, dtout
   end type SimParams
   type(SimParams) :: sim
+
+  type SpecParams
+     real(dl) :: phi0, m2
+     integer :: k_ir, k_cut
+     integer :: type = 1
+  end type SpecParams
+  type(SpecParams) :: spec_params
 
   type ScalarLattice
      real(dl), dimension(:,:), allocatable :: flds
@@ -34,7 +44,6 @@ program Scalar_1D
   type(ScalarLattice) :: simulation
 
 ! What needs fixing, set phi0 out here, allow m^2 to vary from vacuum value, etc.
-!  call set_lattice_params(1024,50._dl,1)
 !  call set_model_params(0.5_dl,1._dl)  ! A default for the double well
 
   call set_lattice_params(1024,50._dl,1)
@@ -42,22 +51,33 @@ program Scalar_1D
  
   fld(1:nLat,1:2) => yvec(1:2*nLat*nFld)
   time => yvec(2*nLat*nFld+1)
+
   alph = 4._dl; n_cross = 4
 
-!#ifdef NEW_RUN
-  call initialize_rand(87,18)  ! Seed for random field generation.
+!  call initialize_rand(87,18)  ! Seed for random field generation.
+  call initialize_rand(1,1)
   call setup(nVar)
   
-  nSamp = 2
+  !!!!! This is for varying high-k modes
+  ! Start by generating the IR field
+  k_ir = nLat/4+1
+  allocate( fld_ir(1:nLat,1:2) )
+  call initialise_fields(fld_ir,k_ir,0.38*twopi)
+  call initialize_rand(125,912)
+  call run_uv_scan_sims(fld_ir,k_ir,10,0.38*twopi)
+
+#ifdef NEW_RUN
+  nSamp = 1
   do i=1,nSamp
      !call initialise_fields(fld,nLat/4+1,3.6_dl) ! starting point for double well
      call initialise_fields(fld,nLat/4+1,0.35*twopi) ! starting point for Drummond
      call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.)
   enddo
 !  call forward_backward_evolution(0.4_dl/omega,10000,100)
-!#endif
+#endif
   
 #ifdef SMOOTH_RUN
+! Debug this to make sure it works, then delete this code to clean up the main program
 !  call run_instanton()
   call initialise_from_file('instanton_checkpt.dat',1024)
   time = 0._dl
@@ -66,6 +86,54 @@ program Scalar_1D
 #endif
   
 contains
+
+  !!! DEBUG THIS, THEN REPLACE THE ABOVE
+  subroutine run_instanton(scl)
+    real(dl), intent(in) :: scl
+    call initialise_from_file('instanton_checkpt.dat',1024)
+    time = 0._dl
+    call setup(nVar)
+    call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
+  end subroutine run_instanton
+  
+
+  !!! DEBUG THIS, THEN REPLACE THE ABOVE
+  subroutine run_ic_scan(nSamp,k_cut,phi0)
+    integer, intent(in) :: nSamp
+    integer, intent(in) :: k_cut
+    real(dl), intent(in) :: phi0
+    integer :: i
+
+    do i=1,nSamp
+!       call initialise_fields(fld,k_cut,phi0)
+!       call time_evolve(dx/alph,int(alpha)*nlat*n_cross,64*n_cross,out=.false.)
+    enddo
+  end subroutine run_ic_scan
+
+  subroutine run_uv_scan_sims(fld_ir,k_ir,nSamp,phi0)
+    real(dl), dimension(:,:), intent(in) :: fld_ir
+    integer, intent(in) :: k_ir, nSamp
+    real(dl), intent(in) :: phi0
+
+    integer :: i
+
+    call output_fields(fld_ir)
+
+    do i=1,nSamp
+       fld = fld_ir
+       call sample_high_k_modes(fld,len,m2eff,0._dl,1,k_ir,nLat/2+1,0.38*twopi) ! Fix this
+       time = 0._dl
+       call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.) ! Fix the nonlocality
+    enddo
+  end subroutine run_uv_scan_sims
+
+  subroutine run_dx_scan(k_cut,phi0)
+    integer, intent(in) :: k_cut
+    real(dl), intent(in) :: phi0
+  end subroutine run_dx_scan
+
+  subroutine vary_one_field()
+  end subroutine vary_one_field
 
   !>@brief
   !> Run a paired simulation consisting of a forward time evolution and
@@ -92,14 +160,6 @@ contains
     time = 0; fld(:,1) = mfld0(1) - dfld0(:,1); fld(:,2) = mfld0(2) - dfld0(:,2)
     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
   end subroutine run_paired_sims
-  
-  subroutine run_instanton(scl)
-    real(dl), intent(in) :: scl
-    call initialise_from_file('instanton_checkpt.dat',1024)
-    time = 0._dl
-    call setup(nVar)
-    call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
-  end subroutine run_instanton
   
   !>@brief
   !> Initialise the integrator, setup FFTW, boot MPI, and perform other necessary setup
@@ -257,17 +317,15 @@ contains
           spec(k_split:) = 1._dl
        case default
           print*,"Invalid fluctuation choice ", type,".  Defaulting to vacuum."
-       end select
-
-       call generate_1dGRF(df,spec(1:kc),.false.)
-       fld(:,1) = fld(:,1) + df(:)
-       
-       spec = spec*w2eff**0.5
-       call generate_1dGRF(df,spec(1:kc),.false.)
-       fld(:,2) = fld(:,2) + df(:)
     end select
+
+    call generate_1dGRF(df,spec(1:km),.false.)
+    fld(:,1) = fld(:,1) + df(:)
     
-  end subroutine vary_high_k_modes
+    spec = spec*w2eff**0.5
+    call generate_1dGRF(df,spec(1:km),.false.)
+    fld(:,2) = fld(:,2) + df(:)
+  end subroutine sample_high_k_modes
 
   !>@brief
   !> Evolve a collection of ns field trajectories holding the short-wavelength part of the field fixed while varying the long wavelengths
