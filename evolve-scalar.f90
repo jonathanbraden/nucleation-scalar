@@ -270,24 +270,6 @@ contains
   end subroutine vary_high_k_modes
 
   !>@brief
-  !> Evolve a collection of ns field trajectories holding the long-wavelength part of the field fixed while varying the short wavelengths
-  subroutine vary_high_k_modes(phi_l,ns)
-    real(dl), dimension(:,:), intent(in) :: phi_l
-    integer, intent(in) :: ns
-
-    real(dl), dimension(1:nlat) :: df
-    integer :: i
-!    call initialise_fields(phi_l,nlat/8)
-    do i=1,ns
-       ! call generate_1dGRF(df)
-       fld(:,1) = phi_l(:,1) + df
-       ! call generate_1dGRF(df)
-       fld(:,2) = phi_l(:,2) + df
-       !call time_evolve()
-    enddo
-  end subroutine vary_high_k_modes
-
-  !>@brief
   !> Evolve a collection of ns field trajectories holding the short-wavelength part of the field fixed while varying the long wavelengths
   subroutine vary_low_k_modes(phi_s,ns)
     real(dl), dimension(:), intent(in) :: phi_s
