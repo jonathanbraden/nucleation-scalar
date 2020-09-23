@@ -37,22 +37,22 @@ program Scalar_1D
 !  call set_lattice_params(1024,50._dl,1)
 !  call set_model_params(0.5_dl,1._dl)  ! A default for the double well
 
-  call set_lattice_params(1024,50._dl,1)
+  call set_lattice_params(1024,25.*2.**0.5,1)
   call set_model_params(1.2_dl,1._dl)  ! existing drummond
  
   fld(1:nLat,1:2) => yvec(1:2*nLat*nFld)
   time => yvec(2*nLat*nFld+1)
-  alph = 4._dl; n_cross = 4
+  alph = 4._dl; n_cross = 1
 
 !#ifdef NEW_RUN
   call initialize_rand(87,18)  ! Seed for random field generation.
   call setup(nVar)
   
-  nSamp = 2
+  nSamp = 1
   do i=1,nSamp
      !call initialise_fields(fld,nLat/4+1,3.6_dl) ! starting point for double well
-     call initialise_fields(fld,nLat/4+1,0.35*twopi) ! starting point for Drummond
-     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.)
+     call initialise_fields(fld,nLat/2+1,0.5**0.5) 
+     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.true.)
   enddo
 !  call forward_backward_evolution(0.4_dl/omega,10000,100)
 !#endif
@@ -163,6 +163,44 @@ contains
     rho(2) = 0.5_dl*sum(fld(:,2)**2) + 0.5_dl*sum(gsq_fd) + sum(v(fld(:,1)))
     rho = rho / dble(nLat)
   end function energy_density
+
+  !>@brief
+  !> Compute the log of the probability of the draw, assuming we are in
+  !> the vacuum (i.e. the log of the Wigner)
+  !
+  !> TO DO: Fix all the normalisations, (i.e. dk in sum, overall prefactor, etc
+  function log_prob(fld,dk)
+    real(dl), dimension(:,:), intent(in) :: fld
+    real(dl), intent(in) :: dk
+    real(dl), dimension(1:2) :: log_prob
+    
+    real(dl), dimension(1:size(fld(:,1))/2+1) :: omega
+    real(dl) :: m2
+    integer :: nLat, i
+    
+    integer, parameter :: KMIN = 2 ! Don't want to include the zero mode
+
+    nLat = size(fld(:,1))
+
+    !!!!!! Fix this to compute the actual base mass scale
+    m2 = 0._dl
+    ! Compute (bare) oscillation frequencies (fix this to have correct mass)
+    do i=1,nLat/2+1
+       omega(i) = sqrt(m2 + dk**2*(i-1)**2)
+    enddo
+    tPair%realSpace(:) = fld(:,1)
+    call fftw_execute_dft_r2c(tPair%planf,tPair%realSpace,tPair%specSpace)
+    ! Fix this so that it correctly deals with the Nyquist mode
+    log_prob(1) = sum( omega(KMIN:)*abs(tPair%specSpace(KMIN:))**2 - 0.5_dl*log(twopi) )  ! Fix the part in the logarithm
+    
+    tPair%realSpace(:) = fld(:,2)
+    call fftw_execute_dft_r2c(tPair%planf,tPair%realSpace,tPair%specSpace)
+    log_prob(2) = sum( abs(tPair%specSpace(KMIN:))**2/omega(KMIN:) )
+
+    ! Do I want to subtract off the constant prefactor?
+    ! Careful with factors of 2 in here ...
+    ! To Do: Bin this in some "bubble range".  But correlation is presumably super important.  This will be useful in the following sense, we can use different cutoffs, and then compute the field probability in the smaller cutoff range and compare the decay time correlations.
+  end function log_prob
   
   subroutine initialise_fields(fld,kmax,phi,klat)
     real(dl), dimension(:,:), intent(inout) :: fld

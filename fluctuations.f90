@@ -76,6 +76,11 @@ contains
     real(dl), dimension(1:size(f))  :: evals
   end subroutine initialize_fluctuations_eigenmodes
 
+  subroutine initialize_hertzberg_bogoliubov(fld,eps)
+    real(dl), dimension(:,:), intent(inout) :: fld
+    real(dl), intent(in) :: eps
+  end subroutine initialize_hertzberg_bogoliubov
+  
   subroutine initialize_bogoliubov_fluctuations(fld)
     real(dl), dimension(:,:), intent(inout) :: fld
   end subroutine initialize_bogoliubov_fluctuations
