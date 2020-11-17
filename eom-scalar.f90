@@ -8,21 +8,16 @@
 !> This module provides storage and equations of motion for a relativistic scalar evolving in one spatial dimension
 !>
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 #include "macros.h"
 #include "fldind.h"
-#define FIELD_TYPE Field_Model
+
+
 module eom
   use constants
 #ifdef FOURIER
   use fftw3
 #endif
   implicit none
-
-  ! Fix these so that they aren't fixed.
-!  integer, parameter :: nLat=512, nFld=1
-!  integer, parameter :: nVar = 2*nLat*nFld+1
-!  real(dl), dimension(1:nVar), target :: yvec  ! This is a problem, does it work if I make it allocatable?
 
   integer :: nLat, nFld, nVar
   real(dl), dimension(:), allocatable, target :: yvec
