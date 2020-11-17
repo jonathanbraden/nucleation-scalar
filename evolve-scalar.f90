@@ -22,20 +22,33 @@ program Scalar_1D
   integer :: n_cross
   integer :: nSamp
   real(dl), dimension(:,:), allocatable :: fld_ir
-  integer :: k_ir
+  integer :: k_ir, k_uv
+  real(dl) :: phi0
 
-  type SimParams
+  type LatticeParams
      real(dl) :: len, dx, dk
      integer :: nLat
-     real(dl) :: alph, dt, dtout
+  end type LatticeParams
+  
+  type TimeParams
+     real(dl) :: dt, dtout, alph
+  end type TimeParams
+  
+  type SimParams
+     type(LatticeParams) :: lat_p
+     type(TimeParams) :: time_p
   end type SimParams
-  type(SimParams) :: sim
 
   type SpecParams
      real(dl) :: phi0, m2
      integer :: k_ir, k_cut
      integer :: type = 1
   end type SpecParams
+
+  
+  type(TimeParams) :: timePar
+  type(LatticeParams) :: latPar
+  type(SimParams) :: sim
   type(SpecParams) :: spec_params
 
   type ScalarLattice
@@ -43,41 +56,65 @@ program Scalar_1D
   end type ScalarLattice
   type(ScalarLattice) :: simulation
 
-! What needs fixing, set phi0 out here, allow m^2 to vary from vacuum value, etc.
+  real(dl) :: lSize
+  integer :: n,ncut,krat, lrat
+
+  real(dl), dimension(:,:,:), allocatable :: flds_ir
+  integer :: samp_uv, samp_ir
+  
+! What needs fixing, set phi0 out here, allow m^2 to vary from vacuum value, etc
 !  call set_model_params(0.5_dl,1._dl)  ! A default for the double well
 
-  call set_lattice_params(1024,50._dl,1)
+  krat = 1; lrat = 1
+  ncut = lrat*10+1; n = krat*lrat*22
+  lSize = lrat*25.*2.**0.5
+
+  !  ncut = 128; n = 256*4
+  n = 1024
+  lSize = 25.*2.**0.5
+  call set_lattice_params(n,lSize,1) 
   call set_model_params(1.2_dl,1._dl)  ! existing drummond
  
   fld(1:nLat,1:2) => yvec(1:2*nLat*nFld)
   time => yvec(2*nLat*nFld+1)
 
-  alph = 4._dl; n_cross = 4
+  alph = 4._dl; n_cross = 2
 
-!  call initialize_rand(87,18)  ! Seed for random field generation.
-  call initialize_rand(1,1)
+  call initialize_rand(87,18)  ! Seed for random field generation.
   call setup(nVar)
-  
-  !!!!! This is for varying high-k modes
-  ! Start by generating the IR field
-  k_ir = nLat/4+1
-  allocate( fld_ir(1:nLat,1:2) )
-  call initialise_fields(fld_ir,k_ir,0.38*twopi)
-  call initialize_rand(125,912)
-  call run_uv_scan_sims(fld_ir,k_ir,10,0.38*twopi)
 
+!#ifdef UV_SCAN
+  ! Start by generating the IR field
+  k_ir = 256; k_uv = 2*(k_ir-1)+1
+  phi0 = 5.**0.5
+  samp_ir = 100; samp_uv = 25
+  allocate( flds_ir(1:nLat,1:2,1:samp_ir) )
+  do i=1,samp_ir
+     call initialise_fields(flds_ir(:,:,i),k_ir,phi0)
+  enddo
+  do i=1,samp_ir
+     call initialize_rand(125,912)  ! Same sequence of UV realisations
+     call run_uv_scan_sims(flds_ir(:,:,i),k_ir,k_uv,samp_uv,phi0)
+  enddo
+!  call run_uv_scan_sims(fld_ir,k_ir,k_uv,25,phi0)
+!#endif
+  
 #ifdef NEW_RUN
-  nSamp = 1
+  k_uv = ncut; k_ir = k_uv ! Defined here so that the output works
+  !phi0 = 0.5*twopi
+  phi0 = 7.**0.5 !5.**0.5
+  nSamp = 1000
   do i=1,nSamp
      !call initialise_fields(fld,nLat/4+1,3.6_dl) ! starting point for double well
-     call initialise_fields(fld,nLat/4+1,0.35*twopi) ! starting point for Drummond
+     call initialise_fields(fld,k_uv,phi0) 
      call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.)
+!     call time_evolve(dx/alph,int(alph)*nlat*n_cross,nlat*n_cross,out=.true.)
   enddo
 !  call forward_backward_evolution(0.4_dl/omega,10000,100)
 #endif
   
 #ifdef SMOOTH_RUN
-! Debug this to make sure it works, then delete this code to clean up the main program
+! Debug this to make sure it works, then delete this code to clean up the main program.  Add option to scale the lattice (i.e. scale the solution) to explore dynamcis of scaling mode.
 !  call run_instanton()
   call initialise_from_file('instanton_checkpt.dat',1024)
   time = 0._dl
@@ -87,6 +124,16 @@ program Scalar_1D
   
 contains
 
+  subroutine sample_initial_fields(nSamp,phi0,k_cut)
+    integer, intent(in) :: nSamp
+    real(dl), intent(in) :: phi0, k_cut
+    integer :: i
+    do i=1,nSamp
+       call initialise_fields(fld,k_uv,phi0)
+       call output_fields(fld)
+    enddo
+  end subroutine sample_initial_fields
+  
   !!! DEBUG THIS, THEN REPLACE THE ABOVE
   subroutine run_instanton(scl)
     real(dl), intent(in) :: scl
@@ -96,7 +143,6 @@ contains
     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
   end subroutine run_instanton
   
-
   !!! DEBUG THIS, THEN REPLACE THE ABOVE
   subroutine run_ic_scan(nSamp,k_cut,phi0)
     integer, intent(in) :: nSamp
@@ -110,23 +156,87 @@ contains
     enddo
   end subroutine run_ic_scan
 
-  subroutine run_uv_scan_sims(fld_ir,k_ir,nSamp,phi0)
+  subroutine run_uv_scan_sims(fld_ir,k_ir,k_cut,nSamp,phi0)
     real(dl), dimension(:,:), intent(in) :: fld_ir
-    integer, intent(in) :: k_ir, nSamp
+    integer, intent(in) :: k_ir, k_cut, nSamp
     real(dl), intent(in) :: phi0
 
     integer :: i
 
     call output_fields(fld_ir)
-
     do i=1,nSamp
        fld = fld_ir
-       call sample_high_k_modes(fld,len,m2eff,0._dl,1,k_ir,nLat/2+1,0.38*twopi) ! Fix this
+       call sample_high_k_modes(fld,len,m2eff,0._dl,1,k_ir,k_cut,phi0)
        time = 0._dl
        call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.) ! Fix the nonlocality
     enddo
   end subroutine run_uv_scan_sims
 
+  !>@brief
+  !> Run an ensemble of UV variation ensembles.
+  !> Here we sample both the IR fields, and also the UV fields
+  !
+  !>@param[in] n_ir - Number of IR field samples
+  !>@param[in] n_uv - Number of UV field samples per IR sample
+
+! Fix this up so it works
+#ifdef UV_Ensemble
+  subroutine run_uv_scan_ensemble(n_ir,n_uv,k_ir,phi0,premake)
+    integer, intent(in) :: n_ir, n_uv
+    integer, intent(in) :: k_ir
+    real(dl), intent(in) :: phi0
+    logical, optional, intent(in) :: premake ! If True, initialize all IR ralizations at the start.  Allows for easy sampling over the same IR ensemble
+
+    real(dl), dimension(1:nLat,1:2) :: fld_ir
+    real(dl), dimension(1:nLat,1:2,1:n_ir) :: ir_ensemble, uv_ensemble
+    integer :: i,j
+
+    ! For reproducibility, being by generating all of the IR fields.
+    ! *If* I run a very large ensemble, this will take a lot of space
+    do i=1, n_ir
+       call initialise_fields(fld_ir,k_ir,phi0)
+       ir_ensemble(:,:,i) = fld_ir
+    enddo
+    do i=1, n_uv
+       call sample_high_k_modes
+    enddo
+
+    do i=1, n_ir
+       !call initialize_fields(fld_ir,k_ir,phi0)
+       do j=1,n_uv
+          fld = fld_ir
+          call sample_high_k_modes(fld,len,m2eff,0._dl,1,k_ir,k_cut,phi0)
+          time = 0._dl
+          call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.) ! Fix the nonlocality
+       enddo
+    enddo
+  end subroutine run_uv_scan_ensemble
+
+  !>@brief
+  !> Same as run_uv_scan_ensemble, except the UV realizations are the same for each IR realization
+  subroutine run_uv_scan_ensemble_(n_ir,n_uv,k_ir,phi0)
+    integer, intent(in) :: n_ir, n_uv, k_ir
+    real(dl), intent(in) :: phi0
+
+    real(dl), dimension(1:nLat,1:2) :: fld_tmp
+    real(dl), dimension(1:nLat,1:2,1:n_ir) :: ir_ensemble, uv_ensemble
+
+    integer :: i,j
+    do i=1_n_uv
+       call sample_high_k_modes(fld_tmp,len,m2eff,0._dl,1,k_ir,k_cut,phi0) ! Fix nonlocality
+       uv_ensemble(:,:,i) = fld_tmp
+    enddo
+    do i=1,n_ir
+       call initialise_fields(fld_tmp,k_ir,phi0)       
+       do j=1,n_uv
+          fld = fld_tmp + uv_ensemble(:,:,j)
+          time = 0._dl
+          call time_evolve(dx/alph,int(alph)*nLat*n_cross,64*n_cross,out=.false.)  ! Fix nonlocality
+       enddo
+    enddo
+  end subroutine run_uv_scan_ensemble_
+#endif
+  
   subroutine run_dx_scan(k_cut,phi0)
     integer, intent(in) :: k_cut
     real(dl), intent(in) :: phi0
@@ -170,36 +280,76 @@ contains
     call initialize_transform_1d(tPair,nLat)  ! nonlocality
   end subroutine setup
 
+  subroutine open_bubble_file(fn)
+    integer, intent(out) :: fn
+    logical :: o
+    inquire(file='bubble-count.dat',opened=o)
+    if (o) then
+       inquire(file='bubble-count.dat',number=fn)
+    else
+       open(unit=newunit(fn),file='bubble-count.dat')
+    endif
+  end subroutine open_bubble_file
+  
+  subroutine write_lattice_header(fn)
+    integer, intent(in) :: fn
+    write(fn,*) "# dx = ",dx,"dt = ",dt_,", L = ",len  ! Fix nonlocality
+  end subroutine write_lattice_header
+  
+  subroutine write_fluctuation_header(fn)
+    integer, intent(in) :: fn
+    write(fn,*) "# phi0 = ", phi0, ", k_ir = ", k_ir, ", k_cut = ", k_uv, ", k_nyq = ", nLat/2+1
+  end subroutine write_fluctuation_header
+  
   subroutine time_evolve(dt,ns,no,out)
     real(dl), intent(in) :: dt
     integer, intent(in) :: ns, no
     logical, intent(in), optional :: out
     integer :: i,j, outsize, nums
-    integer, save :: b_file
-    logical :: o, out_
+    integer, save :: b_file  ! remove save here after rewrite
+    logical :: o, out_, get_period
+    integer :: nl
+    real(dl) :: mean_phi(1:2)
 
+    get_period = .false.  ! New flag to extract period of BG
+    !call open_bubble_file(b_file)
     out_ = .true.; if (present(out)) out_ = out
-    inquire(opened=o,file='bubble-count.dat')
-    if (.not.o) open(unit=newunit(b_file),file='bubble-count.dat')
-    write(b_file,*) "# dx = ",dx,"dt = ",dt
+    inquire(file='bubble-count.dat',opened=o)
+    if (o) inquire(file='bubble-count.dat',number=b_file)
+    if (.not.o) then
+       open(unit=newunit(b_file),file='bubble-count.dat')
+       write(b_file,*) "# dx = ",dx,", dt = ",dt
+       write(b_file,*) "# phi0 = ",phi0,", L = ", len,", k_ir = ",k_ir,", k_cut = ",k_uv,", k_nyq = ",nLat/2+1
+    endif
 
     if (dt > dx) print*,"Warning, violating Courant condition"
-    
+
+    nl = size(fld(:,1))
     outsize = ns/no; nums = ns/outsize
-    print*,"dt out is ",dt*outsize
-    dt_ = dt; dtout_ = dt*outsize  ! Used here again.  Why do I need to define dt_ and dtout_
+    dt_ = dt; dtout_ = dt*outsize  ! Used here again.  Why do I need to define dt_ and dtout_ (it's for the stupid output file header)
     do i=1,nums
        do j=1,outsize
           call gl10(yvec,dt)
        enddo
        if (out_) call output_fields(fld)
-       !write(b_file,*) time, count_bubbles(fld(:,1)), mean_cos(fld(:,1))
-       write(b_file,*) time, mean_cos(fld(:,1)), energy_density(fld)
-       !write(b_file,*) time, sum(fld(:,1))/dble(size(fld(:,1))), energy_density(fld)
+       call write_mean_field_file(b_file,fld,time)
+!       mean_phi = sum(fld,dim=1)/dble(nl)
+!       write(b_file,*) time, mean_cos(fld(:,1)), energy_density(fld), mean_phi(:), sum(vp(fld(:,1)))/nl, sum((fld(:,1)-mean_phi(1))**2)/nl, sum((fld(:,1)-mean_phi(1))**3)/nl
     enddo
     write(b_file,*)
   end subroutine time_evolve
 
+  subroutine write_mean_field_file(u,fld,t)
+    integer, intent(in) :: u
+    real(dl), intent(in) :: fld(:,:), t
+    real(dl), dimension(1:size(fld(1,:))) :: mean_phi
+    integer :: nl
+
+    nl = size(fld(:,1))
+    mean_phi = sum(fld,dim=1)/dble(nl)
+    write(u,*) t, mean_cos(fld(:,1)), energy_density(fld), mean_phi(:), sum(vp(fld(:,1)))/dble(nl), sum((fld(:,1)-mean_phi(1))**2)/dble(nl), sum((fld(:,1)-mean_phi(1))**3)/dble(nl)
+  end subroutine write_mean_field_file
+  
   function energy_density(fld) result(rho)
     real(dl), dimension(:,:), intent(in) :: fld
     real(dl) :: rho(1:2)
@@ -224,10 +374,10 @@ contains
     rho = rho / dble(nLat)
   end function energy_density
   
-  subroutine initialise_fields(fld,kmax,phi,klat)
+  subroutine initialise_fields(fld,kmax,phi0,klat)
     real(dl), dimension(:,:), intent(inout) :: fld
     integer, intent(in) :: kmax
-    real(dl), intent(in), optional :: phi
+    real(dl), intent(in), optional :: phi0
     integer, intent(in), optional :: klat
 
     integer :: i; real(dl) :: dt, theta
@@ -236,7 +386,7 @@ contains
     
     nn = size(fld(:,1))/2+1
     kc = nn; if (present(klat)) kc = klat
-    phiL = 0.5_dl*twopi; if (present(phi)) phiL = phi
+    phiL = 0.5_dl*twopi; if (present(phi0)) phiL = phi0
 
     call initialise_mean_fields(fld)
     yvec(2*nLat+1) = 0._dl ! Add a tcur pointer here
@@ -398,7 +548,7 @@ contains
     call generate_1dGRF(df,spec(1:128),.false.)
     fld(:,2) = fld(:,2) + amp*df(:)
   end subroutine initialise_new_fluctuations
-
+  
 ! Add smoothing from my other repository
   subroutine output_fields(fld)
     real(dl), dimension(:,:), intent(in) :: fld
@@ -406,8 +556,6 @@ contains
     integer, save :: oFile
     real(dl), dimension(1:size(fld(:,1))) :: gsq, gsq_fd
 
-!    if (.true.) return
-    
     inquire(file='fields.dat',opened=o)
     if (.not.o) then
        open(unit=oFile,file='fields.dat')
