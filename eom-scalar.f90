@@ -21,6 +21,8 @@ module eom
 
   integer :: nLat, nFld, nVar
   real(dl), dimension(:), allocatable, target :: yvec
+  real(dl), dimension(:,:), pointer :: fld
+  real(dl), pointer :: time
 
   real(dl) :: len, dx, dk
   real(dl) :: lambda, m2eff
@@ -39,6 +41,8 @@ contains
 
     nVar = 2*nFld*nLat + 1; allocate(yvec(1:nVar))
     dx = len / dble(nLat); dk = twopi/len
+    fld(1:nLat,1:2*nFld) => yvec(1:2*nLat*nFld)
+    time => yvec(nVar)
   end subroutine set_lattice_params
 
   ! Add appropriate subroutine calls here to potential derivs, etc. here
