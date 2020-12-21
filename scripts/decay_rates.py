@@ -2,17 +2,35 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Convenience for analysis
-# Delete later
+# Convenience routine for fitting analysis
 def log_p(tc,ax):
     ax.plot(np.sort(tc[0]),np.log(survive_prob(tc[0],tc[1])))
     return
 
 # Combined returns to combine various steps in the pipeline
-def create_times(files):
+def create_times(files,sig_cut=-5):
     d = [read_mean_field(f) for f in files]
-    return [extract_decay_times(tc[:,:,1],thresh=0.5,cut=0.5,interp=True,dt=tc[0,0,0]) for tc in d]
+    mu = []; sig = []
+    for dc in d:
+        mu.append(np.mean(dc[:,0,1]))
+        sig.append(np.std(dc[:,0,1]))
+        myThresh = mu[i]+sig_cut*sig[i]
+    return [extract_decay_times(tc[:,:,1],thresh=myThresh,cut=myThresh,interp=True,dt=tc[0,0,0]) for i,tc in enumerate(d) ]
 
+def get_means_and_sigma(d):
+    mu = []; sig = []
+    for dc in d:
+        mu.append(np.mean(dc[:,0,1]))
+        sig.append(np.std(dc[:,0,1]))
+    return np.array(mu), np.array(sig)
+
+def decays_from_dat(dat,sigCut=-10,full=False):
+    mu, sig = get_means_and_sigma(dat)
+    th = mu + sigCut*sig
+    if full:
+        return [extract_decay_times_full(dc[:,:,1],dt=dc[0,0,0],interp=True,thresh=th,cut=th) for dc in d]
+    return [extract_decay_times(dc[:,:,1],dt=dc[0,0,0],interp=True,thresh=th,cut=th) for dc in d]
+        
 # Move this into plotting file
 def plot_survival(times,a=None):
     if a == None:
@@ -59,7 +77,7 @@ def read_mean_field(fName):
     d = np.loadtxt(fName)
     dt = np.diff(d[:,tind])
     nTstep = np.where(dt<0)[0][0]+1
-    return d[:d.shape[0]//nTstep*nTstep,:].reshape((-1,nTstep,4))
+    return d[:d.shape[0]//nTstep*nTstep,:].reshape((-1,nTstep,d.shape[1]))
 
 # start debugging this thing
 # Issues:
@@ -113,7 +131,7 @@ def extract_decay_times(time_streams,thresh=0.5,cut=0.5,interp=True,up_cross=Fal
     else:
         td = np.where(np.min(time_streams[:,:],axis=-1) < cut)
         ti = np.argmax(time_streams[td,:] < thresh,axis=-1)[0]
-        
+
     # This needs to be fixed to work when ti = 0, or fucky slope
     if interp:
         t = ti + (thresh-time_streams[td,ti]) / (time_streams[td,ti]-time_streams[td,ti-1])
@@ -128,20 +146,74 @@ def extract_decay_times_full(time_streams,thresh=0.5,cut=0.5,interp=True,up_cros
     This allows a direct comparison between different resolutions using
     identical initial conditions.
     """
-    ti = -np.ones(time_streams.shape[0])/dt  # For future normalisation
+    t = -np.ones(time_streams.shape[0])/dt  # For future normalisation
     if up_cross:
         td = np.where(np.max(time_streams[:,:],axis=-1) > cut)
-        ti[td] = np.argmax(time_streams[td,:] > thresh,axis=-1)[0]
+        ti = np.argmax(time_streams[td,:] > thresh,axis=-1)[0]
     else:
         td = np.where(np.min(time_streams[:,:],axis=-1) < cut)
-        ti[td] = np.argmax(time_streams[td,:] < thresh,axis=-1)[0]
+        ti = np.argmax(time_streams[td,:] < thresh,axis=-1)[0]
 
     #### Need to add interpolation
     if interp:
-        print("Interpolation not yet implemented")
-    return dt*ti
+        print("Interpolation not yet fully tested")
+        t[td] = ti + (thresh-time_streams[td,ti]) / (time_streams[td,ti]-time_streams[td,ti-1])
+    else:
+        t[td] = ti
+    return dt*t
 
-def compare_decay_times():
+def decay_indices(t1,t2):
+    """
+    Given two streams of input decay times, return the indices where both decay, the first decays but the second doesn't, the second decays but the first doesn't, and where neither decays
+
+    Input:
+     t1 - First set of decay times
+     t2 - Second set of decay times
+
+    Output:
+     i_dd - Indices where both decay
+     i_du - Indices where first decays but second doesn't
+     i_ud - Indices where second decays but first doesn't
+     i_dd - Indices where neither decays
+    """
+    i_dd = np.where( (t1>=0.) & (t2>=0.) )
+    i_du = np.where( (t1>=0.) & (t2<0.) )
+    i_ud = np.where( (t1<0.) & (t2>=0.) )
+    i_uu = np.where( (t1<0.) & (t2<0.) )        
+    return i_dd, i_du, i_ud, i_uu
+
+def ind_count(t0,t1,ind,thresh):
+    """
+    Input: 
+      ind    - The indices where both ensembles decay, one does and the other doesn't, and neither do.  In the form of the output of decay_indices
+      thresh - Threshold dt for which two decaying trajectories are determined to not match
+
+    Returns:
+      n - Counts of the 4 indices
+      n_error - Number of misatched trajectories that decayed in both sims
+    """
+    n = np.array([ic[0].size for ic in ind])
+    n_error = np.where(np.abs(t0[ind[0]]-t1[ind[0]]) > thresh)[0].size
+    return n, n_error
+
+def error_prob(t_bad,t_res,thresh=0.5):
+    """
+    Return the fraction of 'bad' decay times given an unresolved and compared resolved simulation
+
+    Input:
+      t_bad : Decay times (including undecayed) times for unresolved sims
+      t_res : Decay times for resolved simulations
+      thresh : Error in dt to be considered a bad decay time
+
+    Output:
+      Fraction of bad decay times defined as:
+        (number_wrong_decays + number_decays_in_unresolved + number_decays_in_resolved) / (number_decays + number_decays_in_unresolved + number_decays_in_resolved)
+    """
+    ind = decay_indices(t_bad,t_res)
+    n,n_error = ind_count(t_bad,t_res,ind,thresh)
+    return (n_error+n[1]+n[2])*1./(n[0]+n[1]+n[2])
+
+def bin_decay_times():
     """
     When this is written, I will slice and dice the decay times for identical
     choices of simulations
@@ -171,6 +243,37 @@ def survive_prob(t_decay,num_samp):
     
 if __name__=="__main__":
     # Temporary to reduce typing
-    with open('files.txt') as f:
+#    fName = 'files-vary-cut.txt'
+#    fName = 'files-hertzberg-varyL.txt'
+#    fName = 'files-cut-pairs.txt'
+#    fName = 'files-cut-base-to-converged.txt'
+    fName = 'files-check-converged-pairs.txt'
+    
+    with open(fName) as f:
         files = f.read().splitlines()
-    pass
+        
+    d = [read_mean_field(f) for f in files]
+    mu,sig = get_means_and_sigma(d)
+    nsig = -10; th = mu+nsig*sig
+
+    tf = [ extract_decay_times_full(dc[:,:,1],dt=dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
+    t = [ extract_decay_times(dc[:,:,1],dt=dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
+    for i in range(3):
+        print( error_prob(tf[2*i],tf[2*i+1]) )
+    
+    fName = 'files-cut-base-to-converged.txt'
+    with open(fName) as f:
+        files = f.read().splitlines()
+        
+    d = [read_mean_field(f) for f in files]
+    mu,sig = get_means_and_sigma(d)
+    for i in range(4):
+        mu[2*i] = mu[2*i+1]
+        sig[2*i] = sig[2*i+1]
+    nsig = -10; th = mu+nsig*sig
+        
+    tf = [ extract_decay_times_full(dc[:,:,1],dt=dc[0,1,0]-dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
+    t = [ extract_decay_times(dc[:,:,1],dt=dc[0,1,0]-dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
+    for i in range(4):
+        print( error_prob(tf[2*i],tf[2*i+1]) )
+    
