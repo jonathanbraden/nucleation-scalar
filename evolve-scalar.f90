@@ -12,18 +12,9 @@ program Scalar_1D
 
   implicit none
 
-  real(dl), dimension(:,:), pointer :: fld
-  real(dl), pointer :: time
   real(dl) :: dtout_, dt_  ! Figure out how to get rid of this horrible nonlocality (used in output, and elsewhere)
 
   integer :: i
-
-  real(dl) :: alph, t_cross
-  integer :: n_cross
-  integer :: nSamp
-  real(dl), dimension(:,:), allocatable :: fld_ir
-  integer :: k_ir, k_uv
-  real(dl) :: phi0
 
   type LatticeParams
      real(dl) :: len, dx, dk
@@ -34,85 +25,64 @@ program Scalar_1D
      real(dl) :: dt, dtout, alph
   end type TimeParams
   
-  type SimParams
-     type(LatticeParams) :: lat_p
-     type(TimeParams) :: time_p
-  end type SimParams
-
   type SpecParams
      real(dl) :: phi0, m2
      integer :: k_ir, k_cut
      integer :: type = 1
   end type SpecParams
 
+  type SimParams
+     type(LatticeParams) :: lat_p
+     type(TimeParams) :: time_p
+     type(SpecParams) :: spec_p
+  end type SimParams
   
   type(TimeParams) :: timePar
-  type(LatticeParams) :: latPar
   type(SimParams) :: sim
-  type(SpecParams) :: spec_params
 
-  type ScalarLattice
-     real(dl), dimension(:,:), allocatable :: flds
-  end type ScalarLattice
-  type(ScalarLattice) :: simulation
+! A bunch of temporary parameters, not necessarily needed to run the simulations, but here for convenience
+  integer :: n; real(dl) :: lSize
+  real(dl) :: alph; integer :: n_cross
 
-  real(dl) :: lSize
-  integer :: n,ncut,krat, lrat
-
-  real(dl), dimension(:,:,:), allocatable :: flds_ir
-  integer :: samp_uv, samp_ir
+  integer :: nSamp, samp_uv, samp_ir
+  integer :: k_ir, k_uv, k_rat
+  real(dl) :: phi0
+  integer :: krat, lrat
   
 ! What needs fixing, set phi0 out here, allow m^2 to vary from vacuum value, etc
 !  call set_model_params(0.5_dl,1._dl)  ! A default for the double well
 
-  krat = 1; lrat = 1
-  ncut = lrat*10+1; n = krat*lrat*22
-  lSize = lrat*25.*2.**0.5
+!  alph = 4._dl; n_cross = 2
 
-  !  ncut = 128; n = 256*4
-  n = 1024
+  call set_model_params(1.2_dl,1._dl)
+
+! This crap is to reproduce Hertzberg's meaningless unconverged results
+!  krat = 1; lrat = 1
+!  ncut = lrat*10+1; n = krat*lrat*22
+!  lSize = lrat*25.*2.**0.5
+
+  phi0=0.3_dl*twopi
   lSize = 25.*2.**0.5
-  call set_lattice_params(n,lSize,1) 
-  call set_model_params(1.2_dl,1._dl)  ! existing drummond
- 
-  fld(1:nLat,1:2) => yvec(1:2*nLat*nFld)
-  time => yvec(2*nLat*nFld+1)
-
-  alph = 4._dl; n_cross = 2
-
-  call initialize_rand(87,18)  ! Seed for random field generation.
-  call setup(nVar)
-
-!#ifdef UV_SCAN
-  ! Start by generating the IR field
-  k_ir = 256; k_uv = 2*(k_ir-1)+1
-  phi0 = 5.**0.5
-  samp_ir = 100; samp_uv = 25
-  allocate( flds_ir(1:nLat,1:2,1:samp_ir) )
-  do i=1,samp_ir
-     call initialise_fields(flds_ir(:,:,i),k_ir,phi0)
-  enddo
-  do i=1,samp_ir
-     call initialize_rand(125,912)  ! Same sequence of UV realisations
-     call run_uv_scan_sims(flds_ir(:,:,i),k_ir,k_uv,samp_uv,phi0)
-  enddo
-!  call run_uv_scan_sims(fld_ir,k_ir,k_uv,25,phi0)
-!#endif
-  
-#ifdef NEW_RUN
-  k_uv = ncut; k_ir = k_uv ! Defined here so that the output works
-  !phi0 = 0.5*twopi
-  phi0 = 7.**0.5 !5.**0.5
+  k_uv = 16; k_ir = k_uv
+  k_rat = 1
+  n = 2*k_uv*k_rat
   nSamp = 1000
-  do i=1,nSamp
-     !call initialise_fields(fld,nLat/4+1,3.6_dl) ! starting point for double well
-     call initialise_fields(fld,k_uv,phi0) 
-     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.)
-!     call time_evolve(dx/alph,int(alph)*nlat*n_cross,nlat*n_cross,out=.true.)
-  enddo
-!  call forward_backward_evolution(0.4_dl/omega,10000,100)
+  alph = 4._dl
+
+  sim%lat_p = make_lattice_params(n,lSize)
+  sim%spec_p = make_spec_params(phi0,1._dl,k_uv,1,k_ir)
+
+  call initialize_rand(87,18)
+  call run_ic_ensemble(nSamp,sim,alph)  ! Improve calling signature to adjust time parameters
+
+#ifdef UVSCAN
+  k_ir = 16; k_uv = 2*(k_ir-1)+1
+  phi0 = 5.**0.5
+  sim%spec_p = make_spec_params(phi0,1._dl,k_uv,1,k_ir)
+  samp_ir = 5; samp_uv = 4
+  call run_ir_fixed_ensemble(samp_ir,samp_uv,sim)
 #endif
-  
+
 #ifdef SMOOTH_RUN
 ! Debug this to make sure it works, then delete this code to clean up the main program.  Add option to scale the lattice (i.e. scale the solution) to explore dynamcis of scaling mode.
 !  call run_instanton()
@@ -123,6 +93,140 @@ program Scalar_1D
 #endif
   
 contains
+
+  function make_lattice_params(n,len) result(latPar)
+    integer, intent(in) :: n
+    real(dl), intent(in) :: len
+    type(LatticeParams) :: latPar
+
+    latPar%len = len; latPar%nLat = n
+    latPar%dx = len/dble(n); latPar%dk = twopi/latPar%len
+  end function make_lattice_params
+
+  function make_spec_params(phi0,m2,ncut,type,k_ir) result(specPar)
+    real(dl), intent(in) :: phi0, m2
+    integer, intent(in) :: ncut, type, k_ir
+    type(SpecParams) :: specPar
+    
+    specPar%phi0 = phi0
+    specPar%m2 = 1._dl
+    specPar%k_cut = ncut
+    specPar%k_ir = k_ir  ! Fix this hardcoding
+    specPar%type = type
+  end function make_spec_params
+
+  subroutine run_ic_ensemble(nSamp,sim,alph)
+    integer, intent(in) :: nSamp
+    type(SimParams), intent(in) :: sim
+    real(dl), intent(in) :: alph
+
+    integer :: n; real(dl) :: dx
+    integer :: i
+    integer :: n_cross, nout_per_cross ! Temporary variables to phase out as parameters to pass in
+
+    n_cross = 2; nout_per_cross = 64
+
+    ! Fix these horrible nonlocalities (needed for output only)
+    k_ir = sim%spec_p%k_ir; k_uv = sim%spec_p%k_cut
+    phi0 = sim%spec_p%phi0
+
+    dx = sim%lat_p%dx; n = sim%lat_p%nLat
+    call set_lattice_params(n,sim%lat_p%len,1)
+    call setup(nVar)
+
+    do i=1,nSamp
+       call initialise_fields(fld,sim%spec_p%k_cut,sim%spec_p%phi0)
+       call time_evolve(dx/alph,int(alph)*n*n_cross,nout_per_cross*n_cross, out=.false.)
+    enddo
+  end subroutine run_ic_ensemble
+  
+  !>@brief
+  !> Run samples of fixed IR realisations sampling the UV simulations.
+  !> The ordering is set so that if lattice parameters are fixed, k_ir is fixed, and the random seed is fixed,
+  !> we get the same sequence of IR samples
+  !> The ordering is such that the UV realisations are the same for each IR sample
+  subroutine run_ir_fixed_ensemble(samp_ir,samp_uv,sim)
+    integer, intent(in) :: samp_ir, samp_uv
+    type(SimParams), intent(in) :: sim
+
+    real(dl), dimension(:,:,:), allocatable :: flds_ir  ! Adjust to allow multiple fields
+    integer :: i
+    integer :: k_ir, k_uv; real(dl) :: phi0
+
+    call set_lattice_params(sim%lat_p%nLat,sim%lat_p%len,1) 
+    fld(1:nLat,1:2) => yvec(1:2*nLat*nFld)
+    time => yvec(2*nLat*nFld+1)
+    call setup(nVar)    
+    allocate(flds_ir(1:nLat,1:2,1:samp_ir))
+
+    phi0 = sim%spec_p%phi0; k_ir = sim%spec_p%k_ir; k_uv = sim%spec_p%k_cut
+    do i = 1,samp_ir
+       call initialise_fields(flds_ir(:,:,i),k_ir,phi0)
+    enddo
+    do i = 1,samp_ir
+       call initialize_rand(125,912)
+       call run_uv_scan_sims(flds_ir(:,:,i),samp_uv,sim%spec_p)
+    enddo   
+  end subroutine run_ir_fixed_ensemble
+
+  subroutine run_uv_scan_sims(fld_ir,nSamp,spec_p)
+    real(dl), dimension(:,:), intent(in) :: fld_ir
+    integer, intent(in) :: nSamp
+    type(SpecParams), intent(in) :: spec_p
+
+    integer :: i
+    real(dl) :: alph; integer :: n_cross  ! Get rid of this ugliness
+    real(dl) :: phi0; integer ::  k_ir, k_cut
+
+    phi0 = spec_p%phi0; k_ir = spec_p%k_ir; k_cut = spec_p%k_cut
+    alph = 4._dl; n_cross = 2
+
+    call output_fields(fld_ir)
+    do i=1,nSamp
+       fld = fld_ir
+       call sample_high_k_modes(fld,len,m2eff,0._dl,1,k_ir,k_cut,phi0)  ! this has nonlocality in m2eff and len
+       time = 0._dl
+       call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.) ! Fix the nonlocality for time-stepping
+    enddo
+  end subroutine run_uv_scan_sims
+
+  subroutine time_evolve(dt,ns,no,out)
+    real(dl), intent(in) :: dt
+    integer, intent(in) :: ns, no
+    logical, intent(in), optional :: out
+    integer :: i,j, outsize, nums
+    integer, save :: b_file  ! remove save here after rewrite
+    logical :: o, out_, get_period
+    integer :: nl
+    real(dl) :: mean_phi(1:2)
+
+    get_period = .false.  ! New flag to extract period of BG
+    !call open_bubble_file(b_file)
+    out_ = .true.; if (present(out)) out_ = out
+    inquire(file='bubble-count.dat',opened=o)
+    if (o) inquire(file='bubble-count.dat',number=b_file)
+    if (.not.o) then
+       open(unit=newunit(b_file),file='bubble-count.dat')
+       write(b_file,*) "# dx = ",dx,", dt = ",dt
+       write(b_file,*) "# phi0 = ",phi0,", L = ", len,", k_ir = ",k_ir,", k_cut = ",k_uv,", k_nyq = ",nLat/2+1
+    endif
+
+    if (dt > dx) print*,"Warning, violating Courant condition"
+
+    nl = size(fld(:,1))
+    outsize = ns/no; nums = ns/outsize
+    dt_ = dt; dtout_ = dt*outsize  ! Used here again.  Why do I need to define dt_ and dtout_ (it's for the stupid output file header)
+    do i=1,nums
+       do j=1,outsize
+          call gl10(yvec,dt)
+       enddo
+       if (out_) call output_fields(fld)
+       call write_mean_field_file(b_file,fld,time)
+!       mean_phi = sum(fld,dim=1)/dble(nl)
+!       write(b_file,*) time, mean_cos(fld(:,1)), energy_density(fld), mean_phi(:), sum(vp(fld(:,1)))/nl, sum((fld(:,1)-mean_phi(1))**2)/nl, sum((fld(:,1)-mean_phi(1))**3)/nl
+    enddo
+    write(b_file,*)
+  end subroutine time_evolve
 
   subroutine sample_initial_fields(nSamp,phi0,k_cut)
     integer, intent(in) :: nSamp
@@ -143,35 +247,6 @@ contains
     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
   end subroutine run_instanton
   
-  !!! DEBUG THIS, THEN REPLACE THE ABOVE
-  subroutine run_ic_scan(nSamp,k_cut,phi0)
-    integer, intent(in) :: nSamp
-    integer, intent(in) :: k_cut
-    real(dl), intent(in) :: phi0
-    integer :: i
-
-    do i=1,nSamp
-!       call initialise_fields(fld,k_cut,phi0)
-!       call time_evolve(dx/alph,int(alpha)*nlat*n_cross,64*n_cross,out=.false.)
-    enddo
-  end subroutine run_ic_scan
-
-  subroutine run_uv_scan_sims(fld_ir,k_ir,k_cut,nSamp,phi0)
-    real(dl), dimension(:,:), intent(in) :: fld_ir
-    integer, intent(in) :: k_ir, k_cut, nSamp
-    real(dl), intent(in) :: phi0
-
-    integer :: i
-
-    call output_fields(fld_ir)
-    do i=1,nSamp
-       fld = fld_ir
-       call sample_high_k_modes(fld,len,m2eff,0._dl,1,k_ir,k_cut,phi0)
-       time = 0._dl
-       call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross,out=.false.) ! Fix the nonlocality
-    enddo
-  end subroutine run_uv_scan_sims
-
   !>@brief
   !> Run an ensemble of UV variation ensembles.
   !> Here we sample both the IR fields, and also the UV fields
@@ -237,13 +312,6 @@ contains
   end subroutine run_uv_scan_ensemble_
 #endif
   
-  subroutine run_dx_scan(k_cut,phi0)
-    integer, intent(in) :: k_cut
-    real(dl), intent(in) :: phi0
-  end subroutine run_dx_scan
-
-  subroutine vary_one_field()
-  end subroutine vary_one_field
 
   !>@brief
   !> Run a paired simulation consisting of a forward time evolution and
@@ -300,44 +368,6 @@ contains
     integer, intent(in) :: fn
     write(fn,*) "# phi0 = ", phi0, ", k_ir = ", k_ir, ", k_cut = ", k_uv, ", k_nyq = ", nLat/2+1
   end subroutine write_fluctuation_header
-  
-  subroutine time_evolve(dt,ns,no,out)
-    real(dl), intent(in) :: dt
-    integer, intent(in) :: ns, no
-    logical, intent(in), optional :: out
-    integer :: i,j, outsize, nums
-    integer, save :: b_file  ! remove save here after rewrite
-    logical :: o, out_, get_period
-    integer :: nl
-    real(dl) :: mean_phi(1:2)
-
-    get_period = .false.  ! New flag to extract period of BG
-    !call open_bubble_file(b_file)
-    out_ = .true.; if (present(out)) out_ = out
-    inquire(file='bubble-count.dat',opened=o)
-    if (o) inquire(file='bubble-count.dat',number=b_file)
-    if (.not.o) then
-       open(unit=newunit(b_file),file='bubble-count.dat')
-       write(b_file,*) "# dx = ",dx,", dt = ",dt
-       write(b_file,*) "# phi0 = ",phi0,", L = ", len,", k_ir = ",k_ir,", k_cut = ",k_uv,", k_nyq = ",nLat/2+1
-    endif
-
-    if (dt > dx) print*,"Warning, violating Courant condition"
-
-    nl = size(fld(:,1))
-    outsize = ns/no; nums = ns/outsize
-    dt_ = dt; dtout_ = dt*outsize  ! Used here again.  Why do I need to define dt_ and dtout_ (it's for the stupid output file header)
-    do i=1,nums
-       do j=1,outsize
-          call gl10(yvec,dt)
-       enddo
-       if (out_) call output_fields(fld)
-       call write_mean_field_file(b_file,fld,time)
-!       mean_phi = sum(fld,dim=1)/dble(nl)
-!       write(b_file,*) time, mean_cos(fld(:,1)), energy_density(fld), mean_phi(:), sum(vp(fld(:,1)))/nl, sum((fld(:,1)-mean_phi(1))**2)/nl, sum((fld(:,1)-mean_phi(1))**3)/nl
-    enddo
-    write(b_file,*)
-  end subroutine time_evolve
 
   subroutine write_mean_field_file(u,fld,t)
     integer, intent(in) :: u
@@ -417,6 +447,9 @@ contains
     nout = int(dtout/dt)
   end subroutine convert_tstep_to_int
 
+  !>@brief
+  !> Periodically repeat a sampled field configuration to a new grid.
+  !> This is useful to exploring the impact of long-wavelength modes on bubble-bubble correlations
   subroutine extend_grid(fld_old,fld_new,us)
     real(dl), dimension(:,:), intent(in) :: fld_old
     real(dl), dimension(:,:), intent(out) :: fld_new
