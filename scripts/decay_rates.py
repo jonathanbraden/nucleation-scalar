@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 # Convenience routine for fitting analysis
 def log_p(tc,ax):
+    print(tc[1])
     ax.plot(np.sort(tc[0]),np.log(survive_prob(tc[0],tc[1])))
     return
 
@@ -213,6 +214,25 @@ def error_prob(t_bad,t_res,thresh=0.5):
     n,n_error = ind_count(t_bad,t_res,ind,thresh)
     return (n_error+n[1]+n[2])*1./(n[0]+n[1]+n[2])
 
+# Return the distribution of decay trajectories
+def decay_frac_dist(times):
+    uv_ax = 1; ir_ax = 0
+    nIR = times.shape[ir_ax]; nUV = times.shape[uv_ax]
+    nDecay = np.sum(times >= 0.,axis=uv_ax) # Check the axes are correct
+
+    decayDist = np.array( [np.sum(nDecay==i) for i in range(nUV+1)] )
+    return nDecay, decayDist
+
+def vary_uv_stats(times):
+    # First, extract only the trajectories that all decay
+    nDecay = np.sum(times >= 0., axis=1)
+    ii_decay = np.where(nDecay==nUV)
+    ii_survive = np.where(nDecay==0)
+    # Now get variance, etc. for the decayed trajectories
+    s = np.std(times[ii_decay],axis=-1)
+    d = np.max(times[ii_decay],axis=-1)-np.min(times[ii_decay],axis=-1)
+    return s,d
+
 def bin_decay_times():
     """
     When this is written, I will slice and dice the decay times for identical
@@ -247,7 +267,8 @@ if __name__=="__main__":
 #    fName = 'files-hertzberg-varyL.txt'
 #    fName = 'files-cut-pairs.txt'
 #    fName = 'files-cut-base-to-converged.txt'
-    fName = 'files-check-converged-pairs.txt'
+#    fName = 'files-check-converged-pairs.txt'
+    fName = 'files-vary-kir-fix-nrat.txt'
     
     with open(fName) as f:
         files = f.read().splitlines()
@@ -257,23 +278,23 @@ if __name__=="__main__":
     nsig = -10; th = mu+nsig*sig
 
     tf = [ extract_decay_times_full(dc[:,:,1],dt=dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
-    t = [ extract_decay_times(dc[:,:,1],dt=dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
-    for i in range(3):
-        print( error_prob(tf[2*i],tf[2*i+1]) )
+#    t = [ extract_decay_times(dc[:,:,1],dt=dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
+#    for i in range(3):
+#        print( error_prob(tf[2*i],tf[2*i+1]) )
     
-    fName = 'files-cut-base-to-converged.txt'
-    with open(fName) as f:
-        files = f.read().splitlines()
+#    fName = 'files-cut-base-to-converged.txt'
+#    with open(fName) as f:
+#        files = f.read().splitlines()
         
-    d = [read_mean_field(f) for f in files]
-    mu,sig = get_means_and_sigma(d)
-    for i in range(4):
-        mu[2*i] = mu[2*i+1]
-        sig[2*i] = sig[2*i+1]
-    nsig = -10; th = mu+nsig*sig
+#    d = [read_mean_field(f) for f in files]
+#    mu,sig = get_means_and_sigma(d)
+#    for i in range(4):
+#        mu[2*i] = mu[2*i+1]
+#        sig[2*i] = sig[2*i+1]
+#    nsig = -10; th = mu+nsig*sig
         
-    tf = [ extract_decay_times_full(dc[:,:,1],dt=dc[0,1,0]-dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
-    t = [ extract_decay_times(dc[:,:,1],dt=dc[0,1,0]-dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
-    for i in range(4):
-        print( error_prob(tf[2*i],tf[2*i+1]) )
+#    tf = [ extract_decay_times_full(dc[:,:,1],dt=dc[0,1,0]-dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
+#    t = [ extract_decay_times(dc[:,:,1],dt=dc[0,1,0]-dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
+#    for i in range(4):
+#        print( error_prob(tf[2*i],tf[2*i+1]) )
     
