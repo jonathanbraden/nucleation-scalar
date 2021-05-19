@@ -1,6 +1,6 @@
 module Fluctuations
   use, intrinsic :: iso_c_binding
-  use constants, only : dl, twopi
+  use constants, only : dl, twopi, pi
   use gaussianRandomField
 
   implicit none 
@@ -124,8 +124,10 @@ contains
     
     norm = (0.5_dl)**0.5 / phiL / sqrt(len) ! Assumes deviates have unit complex norm
 
+    ! Replace this with an option for discrete spectrum
     do i=1,nn
        w2eff(i) = m2 + (twopi/len)**2*(i-1)**2
+       !w2eff(i) = m2 + k2eff( dble(i-1)/dble(nn-1) )
     enddo
     spec = 0._dl
     spec(2:) = norm / w2eff(2:)**0.25
@@ -176,5 +178,14 @@ contains
     call generate_1dGRF(df,spec(1:kc),.false.)
     fld(:,2) = fld(:,2) + df(:)
   end subroutine initialize_thermal_fluctuations
- 
+
+  !>@brief
+  !> Takes the continuum wavenumber (in units of the Nyquist) as input and outputs the effective wavenumber associated
+  !> with a second order centered finite-differencing Laplacian (in units of the Nyquist)
+  elemental function k2eff(k)
+    real(dl), intent(in) :: k
+    real(dl) :: k2eff
+    k2eff = (2._dl/pi**2)*(1._dl-cos(pi*k))
+  end function k2eff
+  
 end module Fluctuations
