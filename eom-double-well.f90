@@ -11,7 +11,7 @@
 
 #include "macros.h"
 #include "fldind.h"
-#define FIELD_TYPE Field_Model
+
 module eom
   use constants
 #ifdef FOURIER
@@ -19,14 +19,11 @@ module eom
 #endif
   implicit none
 
-  ! Fix these so that they aren't fixed.
-!  integer, parameter :: nLat=512, nFld=1
-!  integer, parameter :: nVar = 2*nLat*nFld+1
-!  real(dl), dimension(1:nVar), target :: yvec  ! This is a problem, does it work if I make it allocatable?
-
   integer :: nLat, nFld, nVar
   real(dl), dimension(:), allocatable, target :: yvec
-
+  real(dl), dimension(:,:), pointer :: fld
+  real(dl), pointer :: time
+  
   real(dl) :: len, dx, dk
   real(dl) :: lambda, m2eff
 
@@ -42,8 +39,12 @@ contains
     real(dl), intent(in) :: l
     nLat = n; len = l; nFld = nf
 
-    nVar = 2*nFld*nLat + 1; allocate(yvec(1:nVar))
+    nVar = 2*nFld*nLat + 1
+    if (allocated(yvec)) deallocate(yvec)
+    allocate(yvec(1:nVar))
     dx = len / dble(nLat); dk = twopi/len
+    fld(1:nLat,1:2*nFld) => yvec(1:2*nLat*nFld)
+    time => yvec(nVar)
   end subroutine set_lattice_params
 
   ! Add appropriate subroutine calls here to potential derivs, etc. here
@@ -72,6 +73,15 @@ contains
     phi_fv = -1._dl
   end function phi_fv
 
+  !>@brief
+  !> Computes the false vacuum minimum using leading order lattice RG
+  !>
+  !>@TODO: Not written yet.  Will need to include a root finder
+  real(dl) function phi_fv_renorm(phi0) result(phi_fv)
+    real(dl), intent(in) :: phi0
+    phi_fv = -1._dl
+  end function phi_fv_renorm
+  
   !>@brief
   !> Compute the derivatives of the scalar field in the effective time-independent potential
   subroutine derivs(yc,yp)
