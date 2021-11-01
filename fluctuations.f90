@@ -5,8 +5,19 @@ module Fluctuations
 
   implicit none 
 
+!  type SpecParams
+!     real(dl) :: phi0, m2
+!     integer :: k_ir, k_cut
+!     integer :: type = 1
+!  end type SpecParams
+! When I uncomment the above, also add the spectrum creation subroutine
+  
 contains
 
+!  subroutine initialize_linear_fluctuations_(spec_p)
+!    type(SpecParams), intent(in) :: spec_p
+!  end subroutine initialize_linear_fluctuations_
+  
   ! Add preprocessor for array ordering in case I change it
   !>@brief
   !> Initialise fluctuations in linear perturbation theory approximation
@@ -34,7 +45,7 @@ contains
 
     ! Normalise assuming the Box-Mueller transform gives a complex
     ! random deviate with unit variance
-    norm = (0.5_dl)**0.5 / phiL / sqrt(len)  
+    norm = 1._dl / phiL / sqrt(len)  
 
     do i=1,nn
        w2eff(i) = m2 + (twopi/len)**2*(i-1)**2
@@ -105,30 +116,38 @@ contains
   !> fluctuations generated between lattices of varying size.
   !
   ! TO DO: Add an option to instead directly compare lattices of the same size with different spectral cuts
-  subroutine initialize_vacuum_fluctuations(fld,len,m2,kmax,phi0,klat)
+  subroutine initialize_vacuum_fluctuations(fld,len,m2,kmax,phi0,klat,discrete)
     real(dl), dimension(:,:), intent(inout) :: fld
     real(dl), intent(in) :: len, m2
     integer, intent(in), optional :: kmax, klat
     real(dl), intent(in), optional :: phi0
+    logical, intent(in), optional :: discrete
 
     real(dl), dimension(1:size(fld(:,1))) :: df
     real(dl), dimension(1:size(fld(:,1))/2+1) :: spec, w2eff
     integer :: km, kc
-    integer :: i, nn
+    integer :: i, nn, nl
     real(dl) :: phiL, norm
+    logical :: disc
 
-    nn = size(spec)
+    nn = size(spec); nl = size(fld(:,1))
     km = size(spec); if (present(kmax)) km = kmax
     kc = size(spec); if (present(klat)) kc = klat
     phiL = twopi; if (present(phi0)) phiL = phi0
+    disc = .false.; if (present(discrete)) disc = discrete
     
     norm = (0.5_dl)**0.5 / phiL / sqrt(len) ! Assumes deviates have unit complex norm
 
-    ! Replace this with an option for discrete spectrum
-    do i=1,nn
-       w2eff(i) = m2 + (twopi/len)**2*(i-1)**2
-       !w2eff(i) = m2 + k2eff( dble(i-1)/dble(nn-1) )
-    enddo
+    if (.not.disc) then
+       do i=1,nn
+          w2eff(i) = m2 + (twopi/len)**2*(i-1)**2
+       enddo
+    else
+       do i=1,nn
+          w2eff(i) = m2 + 4._dl*(dble(nl)**2/len**2)*sin(0.25_dl*twopi*dble(i-1)/dble(nn-1))**2  ! Check this for odd lattices, specifically the n, and nn-1 stuff
+       enddo
+    endif
+
     spec = 0._dl
     spec(2:) = norm / w2eff(2:)**0.25
     call generate_1dGRF(df,spec(1:km),.false.,initStride=kc)
@@ -179,6 +198,18 @@ contains
     fld(:,2) = fld(:,2) + df(:)
   end subroutine initialize_thermal_fluctuations
 
+#ifdef RAND_PHASE
+  subroutine randomize_field_phases(flds,nmin,nmax)
+    real(dl), dimension(:,:), intent(inout) :: flds
+
+    integer :: nf, i
+    nf = size(flds(:,1))
+    do i=1,nf
+       call randomize_phases_1d(flds(:,i),nmin,nmax)
+    enddo
+  end subroutine randomize_field_phases
+#endif
+  
   !>@brief
   !> Takes the continuum wavenumber (in units of the Nyquist) as input and outputs the effective wavenumber associated
   !> with a second order centered finite-differencing Laplacian (in units of the Nyquist)

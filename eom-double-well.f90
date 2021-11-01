@@ -25,7 +25,7 @@ module eom
   real(dl), pointer :: time
   
   real(dl) :: len, dx, dk
-  real(dl) :: lambda, m2eff
+  real(dl) :: lambda, m2eff_
 
 #ifdef FOURIER
   type(transformPair1D) :: tPair
@@ -51,22 +51,22 @@ contains
   subroutine set_model_params(lam,m2)
     real(dl), intent(in) :: m2, lam
     lambda = lam;
-    m2eff = 2._dl*(1._dl-lambda)  ! check this
+    m2eff_ = (1._dl-lambda)  ! check this
   end subroutine set_model_params
 
   real(dl) elemental function v(phi)
     real(dl), intent(in) :: phi
-    v = 0.25_dl*(phi**2-1._dl)**2 + lambda*(phi**3/3._dl - phi + 2._dl/3._dl)
+    v = 0.125_dl*(phi**2-1._dl)**2 + 0.5_dl*lambda*(phi**3/3._dl - phi + 2._dl/3._dl)
   end function v
 
   real(dl) elemental function vp(phi)
     real(dl), intent(in) :: phi
-    vp = (phi**2-1._dl)*(phi+lambda)
+    vp = 0.5_dl*(phi**2-1._dl)*(phi+lambda)
   end function vp
 
   real(dl) elemental function vpp(phi)
     real(dl), intent(in) :: phi
-    vpp = 3._dl*phi**2 - 1._dl + 2._dl*lambda*phi
+    vpp = 1.5_dl*phi**2 - 0.5_dl + lambda*phi
   end function vpp
   
   real(dl) function phi_fv()
@@ -93,7 +93,7 @@ contains
 #endif
     yp(TIND) = 1._dl  ! Uncomment to track time as a variable
     yp(FLD) = yc(DFLD)
-    yp(DFLD) = -(yc(FLD)**2-1._dl)*(yc(FLD)+lambda)
+    yp(DFLD) = -0.5_dl*(yc(FLD)**2-1._dl)*(yc(FLD)+lambda)
     
 #ifdef DIFF
 #ifdef DISCRETE

@@ -64,9 +64,6 @@ module gaussianRandomField
   use fftw3
 
   implicit none
-
-!  complex(C_DOUBLE_COMPLEX), parameter :: iImag = (0._dl, 1._dl) ! defined in FFTW module
-!  real(C_DOUBLE), parameter :: twopi = 
   logical :: seed_init = .false.
 
 contains
@@ -129,11 +126,6 @@ contains
 
     if (.not.present(initStride)) then; stride = nnk; else; stride = initStride; endif
     if ( stride > nnk ) then; print*,"Stride is larger than number of Fourier modes.  Setting to nyquist"; stride = nnk; endif
-
-    if (.not.seed_init) then
-       print*,"Error, random number generator not initialized.  Call initialize_rand, using default seed values"
-       call initialize_rand(75,13)
-    endif
     
     allocate(Fk(1:nn))
     fft_plan = fftw_plan_dft_c2r_1d(nlat, Fk, field, FFTW_ESTIMATE)
@@ -171,6 +163,64 @@ contains
     endif
   end subroutine generate_1dGRF
 
+  !>@brief
+  !> Use LatticeEasy initialization of the random fluctuations, which creates a nonGaussian initial state,
+  !> but maintains the correct power spectrum.
+  subroutine generate_1dGRF_LE(fld, dfld, spectrum, omega, initStride)
+    real(C_DOUBLE), dimension(:), intent(inout) :: fld, dfld
+    real(dl), dimension(:), intent(in) :: spectrum, omega
+    integer, optional :: initStride
+
+    integer :: nlat, nn, stride, nnk
+    logical :: cut
+    real(dl), allocatable, dimension(:) :: amp, phase1, phase2
+    complex(dl), allocatable, dimension(:) :: deviate
+    complex(C_DOUBLE_COMPLEX) :: Fk(1:size(fld)/2+1)
+    type(C_PTR) :: fft_plan
+
+    nlat = size(fld); nn = nlat/2 + 1; nnk = size(spectrum); cut = .false.
+    if (nn > nnk) then
+       print*,"Warning spectrum is smaller than the number of required Fourier modes in 1dGRF.  Additional high frequency modes will not be sampled."
+       cut = .true.
+    endif
+
+    if (.not.present(initStride)) then; stride = nnk; else; stride = initStride; endif
+    if ( stride > nnk ) then; print*,"Stride is larger than number of Fourier modes.  Setting to nyquist"; stride = nnk; endif
+
+    if (.not.seed_init) then
+       print*,"Error, random number generator not initialized.  Calling initialize_rand, using default seed values"
+       call initialize_rand(75,13)
+    endif
+
+! Generate Gaussian random deviates using Box-Muller
+    ! Normalization chosen so that < Re(x)^2+Im(x)^2 > = 1
+    allocate( amp(1:nnk),phase1(1:nnk),phase2(1:nnk),deviate(1:nnk) )
+    
+    call random_number(amp(1:stride))
+    call random_number(phase1(1:stride)); call random_number(phase2(1:stride))
+    if (stride < nnk) then
+       call random_number( amp(stride+1:nnk) )
+       call random_number( phase1(stride+1:nnk) )
+       call random_number( phase2(stride+1:nnk) )
+    endif
+
+    fft_plan = fftw_plan_dft_c2r_1d(nlat, Fk, fld, FFTW_ESTIMATE)
+    deviate = sqrt(-log(amp))*(exp(iImag*twopi*phase1)+exp(iImag*twopi*phase2))/sqrt(2._dl)
+    Fk(1:nnk) = deviate * spectrum
+    Fk(1) = 0.
+    Fk(nnk+1:nn) = 0._dl
+    call fftw_execute_dft_c2r(fft_plan, Fk, fld)
+    call fftw_destroy_plan(fft_plan)
+    
+    fft_plan = fftw_plan_dft_c2r_1d(nlat, Fk, dfld, FFTW_ESTIMATE)
+    deviate = sqrt(-log(amp))*(exp(iImag*twopi*phase1)-exp(iImag*twopi*phase2))/sqrt(2._dl)
+    Fk(1:nnk) = deviate * spectrum  ! Fix this
+    Fk(1) = 0.
+    Fk(nnk+1:nn) = 0._dl
+    call fftw_execute_dft_c2r(fft_plan, Fk, dfld)
+    call fftw_destroy_plan(fft_plan)
+    
+  end subroutine generate_1dGRF_LE
 
   !> @brief
   !> Generate two 1D GRF with specified (k-dependent) cross-correlation
@@ -214,6 +264,30 @@ contains
 !    call fftw_
   end subroutine generate_correlated_1dGRF
 
+  !>@brief
+  !> Randomize the phases of the input between the indicated wavenumbers.
+  subroutine randomize_phases_1d(fld,nmin,nmax)
+    real(dl), dimension(:), intent(inout) :: fld
+    integer, intent(in) :: nmin, nmax
+
+    integer :: n
+    real(dl), dimension(nmin:nmax) :: phase
+    complex(dl), dimension(size(fld)/2+1) :: fk
+    type(C_PTR) :: fft_plan
+
+    call random_number( phase(nmin:nmax) )
+
+    n = size(fld)
+    ! Forward FFT the field
+    fft_plan = fftw_plan_dft_r2c_1d(n,fld,fk,FFTW_ESTIMATE)
+    call fftw_execute_dft_r2c(fft_plan,fld,fk)
+    call fftw_destroy_plan(fft_plan)
+    fk(nmin:nmax) = fk(nmin:nmax)*exp(iImag*twopi*phase(nmin:nmax))
+    fft_plan = fftw_plan_dft_c2r_1d(n,fk,fld,FFTW_ESTIMATE)
+    call fftw_execute_dft_c2r(fft_plan,fk,fld)
+    call fftw_destroy_plan(fft_plan)
+  end subroutine randomize_phases_1d
+  
 #ifdef TESTING
   subroutine generate_2dGRF(field, spectrum, convolve)
     real(C_DOUBLE), dimension(:,:), intent(inout) :: field
@@ -309,6 +383,7 @@ contains
 
     seed_init=.true.
     call random_seed(size=nseed)
+    print*,"Seed size is ",nseed
     allocate(seeds(1:nseed))
     seeds = seed + seedfac*(/ (i-1, i=1,nseed) /)
     call random_seed(put=seeds)

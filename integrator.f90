@@ -157,8 +157,10 @@ contains
     integer, intent(in) :: nv
     numVar = nv
 #ifdef ALLOCATE_G
+    if (allocated(g)) deallocate(g)
     allocate(g(nv,order))
 #ifdef USEBLAS
+    if (allocated(gtmp)) deallocate(gtmp)
     allocate(gtmp(nv,order))
 #endif
 #endif
