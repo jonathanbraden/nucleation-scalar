@@ -9,9 +9,8 @@ BLAS = F
 
 # Default FFTW Lib location
 #FFTW_DIR = /share/apps/fftw-3.3.5/
-#FFTW_INC = -I$(FFTW_DIR)include/
-#FFTW_LIB = -L$(FFTW_DIR)lib/
-FFTW_DIR = /opt/fftw/3.3.5-gcc-5.4.0-openmpi-2.0.0/
+#FFTW_DIR = /opt/fftw/3.3.5-gcc-5.4.0-openmpi-2.0.0/
+FFTW_DIR = /usr/local/
 FFTW_INC = -I$(FFTW_DIR)include/
 FFTW_LIB = -L$(FFTW_DIR)lib/
 
@@ -75,8 +74,7 @@ ifeq ($(BENCH_FINE),T)
 	MACROS+= -DBENCHMARK_FINE_GRAIN=1
 endif
 
-#OBJS = constants.o my_clock.o fftw_mod_wtype.o random_field.o eom.o integrator.o
-OBJS = constants.o utils.o fftw_mod_wtype.o random_field.o fluctuations.o eom-scalar.o integrator.o bubble-extraction.o
+OBJS = constants.o utils.o data-types.o fftw_mod_wtype.o random_field.o fluctuations.o eom-scalar.o integrator.o bubble-extraction.o
 
 scalar: %: $(OBJS) evolve-scalar.o
 	$(FC) $(FFLAGS) $(FOPT) $(FFTW_INC) $(MACROS) -o scalar-1d evolve-scalar.o $(OBJS) $(FFTW_LIB) $(FLIBS) $(THREAD_LIB)

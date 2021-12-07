@@ -4,6 +4,7 @@ program Scalar_1D
   use, intrinsic :: iso_c_binding
   use constants, only : dl, twopi
   use utils, only : newunit
+  use DataTypes
   use gaussianRandomField  ! remove this to fluctuations module
   use Fluctuations
   use eom
@@ -16,28 +17,6 @@ program Scalar_1D
 
   integer :: i
 
-  type LatticeParams
-     real(dl) :: len, dx, dk
-     integer :: nLat
-  end type LatticeParams
-  
-  type TimeParams
-     real(dl) :: dt, dtout, alpha
-     integer :: nstep, nout_step, out_step_size
-  end type TimeParams
-  
-  type SpecParams
-     real(dl) :: phi0, m2
-     integer :: k_ir, k_cut
-     integer :: type = 1
-  end type SpecParams
-
-  type SimParams
-     type(LatticeParams) :: lat_p
-     type(TimeParams) :: time_p
-     type(SpecParams) :: spec_p
-  end type SimParams
-  
   type(TimeParams) :: timePar
   type(SimParams) :: sim
 
@@ -56,10 +35,12 @@ program Scalar_1D
   integer :: n_cross, nout_per_cross, cross_div
   real(dl) :: alpha
   real(dl) :: m2eff
-  
-!  call initialize_rand(87,18)
+  real(dl) :: lamVal
+
+  !  call initialize_rand(87,18)
   call initialize_rand(81124617,18)
-  call set_model_params(1._dl,1._dl)
+  lamVal = 1.2_dl
+  call set_model_params(lamVal,1._dl)
   
 !#ifdef STOCHASTIC
 ! This crap is to reproduce Hertzberg's meaningless unconverged results
@@ -71,10 +52,22 @@ program Scalar_1D
   lSize = 64._dl*lrat; n = 1024*lrat
   sim%lat_p = make_lattice_params(n,lSize)  
 
+  phi0 = 6.**0.5; m2eff = lamVal**2-1._dl; k_uv = 512; k_ir = k_uv
   !  phi0 = 0.4_dl*twopi; m2eff = 1.2**2-1.; k_uv = 64; k_ir = k_uv
-  phi0 = 1._dl; m2eff = 1._dl; k_uv = 512*lrat; k_ir = k_uv
-  sim%spec_p = make_spec_params(phi0,m2eff,k_uv,1,k_ir)
-
+  !phi0 = sqrt(9._dl); m2eff = lamVal**2-1._dl; k_uv = 512*lrat; k_ir = k_uv
+  !m2eff = 1.41625  ! phi0 = sqrt(2.5)
+  !m2eff = 1.6386  ! phi0 = sqrt(3.)
+  !m2eff = 1.93485 ! for phi0 = 2
+  !m2eff = 2.12676 ! for phi0 = sqrt(5.)
+  !m2eff = 2.4932  ! phi0 = sqrt(9.)
+  
+  ! Correct mass here (clean up this call)
+  ! Add a true false flag for correcting mass
+!  m2eff = m2_1loop(phi0,1.-4.*lamVal**2,lamVal**2-1.,lSize,k_uv)
+!  print*, m2eff, m2_1_iter(phi0,lamVal,lSize,k_uv)
+  
+  sim%spec_p = make_spec_params(phi0,m2eff,k_uv,1,k_ir,sim%lat_p%dk)
+  
   ! Reduce this to a function call
   ! Also fix it
   alpha = 8._dl
@@ -98,7 +91,7 @@ program Scalar_1D
 #endif
 
 !#ifdef IC_ENSEMBLE
-  nSamp = 1000
+  nSamp = 3
   call run_ic_ensemble(sim,nSamp)
 !#endif
   
@@ -109,7 +102,7 @@ program Scalar_1D
   phi0 = 5.**0.5
 
   sim%lat_p = make_lattice_params(128,25.*2.**0.5)
-  sim%spec_p = make_spec_params(phi0,m2eff,k_uv,1,k_ir)
+  sim%spec_p = make_spec_params(phi0,m2eff,k_uv,1,k_ir,sim%lat_p%dk)
   samp_ir = 100; samp_uv = 20
   call run_ir_fixed_ensemble(samp_ir,samp_uv,sim,fix_uv=.false.)
 #endif
@@ -151,28 +144,8 @@ program Scalar_1D
 #endif
   
 contains
-  
-  function make_lattice_params(n,len) result(latPar)
-    integer, intent(in) :: n
-    real(dl), intent(in) :: len
-    type(LatticeParams) :: latPar
 
-    latPar%len = len; latPar%nLat = n
-    latPar%dx = len/dble(n); latPar%dk = twopi/latPar%len
-  end function make_lattice_params
-
-  ! Move this to the fluctuations module
-  ! Replace call signature with a SpecParams variable
-  function make_spec_params(phi0,m2,ncut,type,k_ir) result(specPar)
-    real(dl), intent(in) :: phi0, m2
-    integer, intent(in) :: ncut, type, k_ir
-    type(SpecParams) :: specPar
-    
-    specPar%phi0 = phi0; specPar%m2 = m2
-    specPar%k_cut = ncut; specPar%k_ir = k_ir 
-    specPar%type = type
-  end function make_spec_params
-
+  ! Move this into the type specification file
   function make_time_params_w_lattice(latPar,alpha,n_cross) result(timePar)
     type(LatticeParams), intent(in) :: latPar
     real(dl), intent(in) :: alpha
@@ -184,40 +157,6 @@ contains
     timePar%nstep = 1
     timePar%nout_step = 1
   end function make_time_params_w_lattice
-
-  
-  !>@brief
-  !> Read in simulation data from a parameter file
-  !
-  ! WRITE THIS !!
-  subroutine read_parameters(paramFile,sim)
-    character(*), intent(in) :: paramFile
-    type(SimParams), intent(out) :: sim
-  end subroutine read_parameters
-  
-  subroutine scaled_instanton_energies(inFile,n,lenBase)
-    character(*), intent(in) :: inFile
-    integer, intent(in) :: n
-    real(dl) :: lenBase
-
-    integer :: i, nscl
-    real(dl) :: lenScl
-    
-    nscl = 21
-
-    call set_model_params(1.2_dl,1._dl)
-    call set_lattice_params(n,lenBase,1)
-    call initialise_from_file(inFile,n)
-    time = 0._dl
-
-    ! lenScl = 
-    ! dx = lenScl /dble(nLat); dk = twopi/lenScl
-    ! print*,energy_density(fld)
-    ! print*,sum(energy_density(fld))
-    do i=1,nscl
-
-    enddo
-  end subroutine scaled_instanton_energies
 
   !>@brief
   !> Scan over initial condition masses
@@ -257,11 +196,6 @@ contains
        sim%spec_p%k_cut = kc_vals(i_)
     enddo
   end subroutine scan_ics_kcut
-
-  !>@brief
-  !> Scan over initial condition IR cutoffs (i.e. lengths)
-  subroutine scan_ics_length()
-  end subroutine scan_ics_length
   
 ! This is broken if I use finite differencing
   subroutine sample_ics(sim,nSamp,spec_out_,fld_out_)
@@ -298,8 +232,8 @@ contains
     call set_lattice_params(n,sim%lat_p%len,1)
     call setup(nVar) 
     do i=1,nSamp
-       call initialise_fields(fld,sim%spec_p%k_cut,sim%spec_p%phi0,m2=sim%spec_p%m2)
-       means = sum(fld,dim=1)/dble(n)
+       call initialise_fields_w_sim(fld, sim)
+       !call initialise_fields(fld, sim%spec_p%k_cut, sim%spec_p%phi0, m2=sim%spec_p%m2)       means = sum(fld,dim=1)/dble(n)
        write(u1,*) means, sum((fld(:,1)-means(1))**2)/dble(n), sum((fld(:,2)-means(2))**2)/dble(n), sum((fld(:,1)-means(1))**3)/dble(n), sum((fld(:,1)-means(1))**4)/dble(n), sum(vp(fld(:,1)))/dble(n)
        
        tPair%realSpace(:) = fld(:,1)
@@ -325,7 +259,9 @@ contains
     write(u1,*) ""
     if (spec_out) close(u2)
   end subroutine sample_ics
-  
+
+  ! TODO: Add input option to not write full field evolution output
+  ! TODO: Improve initialise fields and time_evolve calls to only take in the spectrum parameters and the time_parameters as input
   subroutine run_ic_ensemble(sim, nSamp)
     type(SimParams), intent(in) :: sim
     integer, intent(in) :: nSamp
@@ -342,7 +278,8 @@ contains
     call write_bubble_header(u1,sim)
     
     do i=1,nSamp
-       call initialise_fields(fld,sim%spec_p%k_cut,sim%spec_p%phi0,m2=sim%spec_p%m2)
+       call initialise_fields_w_sim(fld, sim)
+       !call initialise_fields(fld, sim%spec_p%k_cut, sim%spec_p%phi0, m2=sim%spec_p%m2)
        call time_evolve(sim%time_p%dt, sim%time_p%nstep, sim%time_p%nout_step, out=.true.)
     enddo
   end subroutine run_ic_ensemble
@@ -371,7 +308,9 @@ contains
 
     phi0 = sim%spec_p%phi0; k_ir = sim%spec_p%k_ir; k_uv = sim%spec_p%k_cut
     do i = 1,samp_ir
-       call initialise_fields(flds_ir(:,:,i),k_ir,phi0)
+       ! Debut this one
+       !call initialise_fields(flds_ir(:,:,i),k_ir,phi0)
+       call initialise_fields_w_sim(flds_ir(:,:,i), sim)
     enddo
     do i = 1,samp_ir
        if (fix_uv_) call initialize_rand(125,912)
@@ -452,15 +391,13 @@ contains
 
   subroutine time_evolve_(sim,out)
     type(SimParams), intent(in) :: sim
-    logical, intent(in), optional :: out
+    logical, intent(in) :: out
 
     integer :: i,j, outsize, nums
     integer, save :: b_file  ! remove save here after rewrite
-    logical :: o, out_
+    logical :: o
     integer :: nl
     real(dl) :: mean_phi(1:2)
-    
-    out_ = .true.; if (present(out)) out_ = out
 
     ! Replace this with a subroutine call
     inquire(file='bubble-count.dat',opened=o)
@@ -473,18 +410,19 @@ contains
     if (sim%time_p%dt > sim%lat_p%dx) print*,"Warning, violating Courant condition"
 
     nl = size(fld(:,1))
-    ! Check this line
+
+    ! Fix up this ugly stuff
     !outsize = ns/no; nums = ns/outsize
     outsize = sim%time_p%nstep / sim%time_p%nout_step
     nums = sim%time_p%nstep / outsize
     dt_ = sim%time_p%dt; dtout_ = sim%time_p%dtout  ! Used here again.  Why do I need to define dt_ and dtout_ (it's for the stupid output file header)
-    if (out_) call output_fields_binary(fld)
+    if (out) call output_fields_binary(fld)
     call write_mean_field_file(b_file,fld,time)
     do i=1,nums
        do j=1,outsize
           call gl10(yvec,sim%time_p%dt)
        enddo
-       if (out_) call output_fields_binary(fld)
+       if (out) call output_fields_binary(fld)
        call write_mean_field_file(b_file,fld,time)
     enddo
     write(b_file,*)
@@ -494,6 +432,7 @@ contains
     integer, intent(in) :: nSamp
     real(dl), intent(in) :: phi0, k_cut
     integer :: i
+
     do i=1,nSamp
        call initialise_fields(fld,k_uv,phi0)
        call output_fields(fld)
@@ -590,7 +529,7 @@ contains
 
     call initialize_rand(87,18)  ! Random number seed
     call setup(nVar)
-    call initialise_fields(fld,nLat/4+1,3.6_dl)
+    call initialise_fields(fld,nLat/4+1,3.6_dl)  ! This is a fixed number, needs to be fixed
     mfld0 = sum(fld,dim=1)/dble(nLat); dfld0(:,1) = fld(:,1) - mfld0(1); dfld0(:,2) = fld(:,2) - mfld0(2)
 
     time = 0; 
@@ -669,7 +608,8 @@ contains
     mean_phi = sum(fld,dim=1)/dble(nl)
     write(u,*) t, mean_cos(fld(:,1)), energy_density(fld), mean_phi(:), sum(vp(fld(:,1)))/dble(nl), sum((fld(:,1)-mean_phi(1))**2)/dble(nl), sum((fld(:,1)-mean_phi(1))**3)/dble(nl), sum((fld(:,1)-mean_phi(1))**4)/dble(nl) !cos_smoothed(fld(:,1),tPair,n_sm)
   end subroutine write_mean_field_file
-  
+
+  ! Move this somewhere more sensible
   function energy_density(fld) result(rho)
     real(dl), dimension(:,:), intent(in) :: fld
     real(dl) :: rho(1:2)
@@ -694,43 +634,45 @@ contains
     rho = rho / dble(nLat)
   end function energy_density
 
-  subroutine initialise_fields_(fld,spec_par,klat)
+  ! TO DO : Need to add mean_fld as an input instead of an external subroutin
+  subroutine initialise_fields_w_sim(fld,sim,k_split,mean_fld)
     real(dl), dimension(:,:), intent(inout) :: fld
-    type(SpecParams), intent(in) :: spec_par
-    integer, intent(in), optional :: klat  ! Figure out if I need this
+    type(SimParams), intent(in) :: sim
+    real(dl), dimension(2), intent(in), optional :: mean_fld
+    integer, intent(in), optional :: k_split  ! Figure out if I need this
 
-    integer :: kc, nn
+    integer :: ks_, nn
 
     nn = size(fld(:,1))/2 + 1
-    kc = nn; if (present(klat)) kc = klat
-    
+    ks_ = nn; if (present(k_split)) ks_ = k_split
+
+    ! Initialization of mean field
+    !fld(:,1) = mean_fld(1); fld(:,2) = mean_fld(2)
     call initialise_mean_fields(fld)
+
     yvec(2*nLat+1) = 0._dl  ! Fix this nonlocality
-    ! Also fix non-locality associated with len in here
-    call initialize_vacuum_fluctuations(fld,len,spec_par%m2,spec_par%k_cut,spec_par%phi0,kc) ! nonlocality in len
-  end subroutine initialise_fields_
+    call initialize_vacuum_fluctuations_w_par(fld, sim%spec_p, ks_, discrete_k=.false.)
+  end subroutine initialise_fields_w_sim
   
-  subroutine initialise_fields(fld,kmax,phi0,klat,m2)
+  subroutine initialise_fields(fld,kmax,phi0,k_split,m2)
     real(dl), dimension(:,:), intent(inout) :: fld
     integer, intent(in) :: kmax
-    real(dl), intent(in), optional :: phi0
-    integer, intent(in), optional :: klat
-    real(dl), intent(in), optional :: m2
+    real(dl), intent(in) :: phi0
+    integer, intent(in), optional :: k_split
+    real(dl), intent(in), optional :: m2 ! This shouldn't be optional
 
     integer :: i; real(dl) :: dt, theta  ! where do I use these?
-    integer :: kc, nn
+    integer :: ks_, nn
     real(dl) :: phiL, m2L
     
     nn = size(fld(:,1))/2+1
-    kc = nn; if (present(klat)) kc = klat
-    phiL = 0.5_dl*twopi; if (present(phi0)) phiL = phi0
-    m2L = m2eff; if (present(m2)) m2L = m2  ! Fix the nonlocality
+    ks_ = nn; if (present(k_split)) ks_ = k_split
+    phiL = phi0
+    m2L = m2eff; if (present(m2)) m2L = m2  ! Fix the nonlocality with m2eff
     
     call initialise_mean_fields(fld)
     yvec(2*nLat+1) = 0._dl ! Add a tcur pointer here
-    call initialize_vacuum_fluctuations(fld,len,m2L,kmax,phiL,kc)  ! nonlocality in len
-    !!! Test this new subroutine
-!    call initialize_linear_fluctuations(fld,len,m2eff,0._dl,1,kmax)  !!! Debug this more
+    call initialize_vacuum_fluctuations(fld,len,phiL,m2L,kmax,ks_)  ! nonlocality in len
   end subroutine initialise_fields
 
   !>@brief
@@ -808,12 +750,16 @@ contains
   end subroutine sample_high_k_modes
 
   !! Rewrite this with new interface
+  !! It's horribly out of date
   subroutine forward_backward_evolution(dt,ns,no,amp)
     real(dl), intent(in) :: dt
     integer,intent(in) :: ns,no
     real(dl), intent(in), optional :: amp
+    real(dl) :: phiL
+
+    phiL = twopi
     
-    call initialise_fields(fld,nLat/8)
+    call initialise_fields(fld,nLat/8,phiL)
     call setup(nVar)
     call output_fields(fld)
     call time_evolve(dt,ns,no)

@@ -1,6 +1,7 @@
 module Fluctuations
   use, intrinsic :: iso_c_binding
   use constants, only : dl, twopi, pi
+  use DataTypes, only : SpecParams
   use gaussianRandomField
 
   implicit none 
@@ -14,10 +15,6 @@ module Fluctuations
   
 contains
 
-!  subroutine initialize_linear_fluctuations_(spec_p)
-!    type(SpecParams), intent(in) :: spec_p
-!  end subroutine initialize_linear_fluctuations_
-  
   ! Add preprocessor for array ordering in case I change it
   !>@brief
   !> Initialise fluctuations in linear perturbation theory approximation
@@ -110,30 +107,47 @@ contains
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+  !TODO: Write this to just take the spectral parameters as input to simplify calling signature
+  subroutine initialize_vacuum_fluctuations_w_par(fld,spec_p,k_split,discrete_k)
+    real(dl), dimension(:,:), intent(inout) :: fld
+    type(SpecParams), intent(in) :: spec_p
+    integer, intent(in), optional :: k_split
+    logical, intent(in), optional :: discrete_k
+
+    integer :: ks_; logical :: disc_
+    real(dl) :: lSize
+
+    ks_ = size(fld(:,1)); if (present(k_split)) ks_ = k_split
+    disc_ = .false.; if (present(discrete_k)) disc_ = discrete_k
+    lSize = twopi / spec_p%dk
+    
+    ! To do: rewrite the subroutine directly in place here
+    call initialize_vacuum_fluctuations(fld, lSize, spec_p%phi0, spec_p%m2, spec_p%k_cut, k_split=ks_, discrete=disc_)
+  end subroutine initialize_vacuum_fluctuations_w_par
+    
   !>@brief
   !> Initialise Minkowski Gaussian vacuum approximation for fluctuations.
   !> Spectra in this subroutine are truncated for direct comparison of 
   !> fluctuations generated between lattices of varying size.
   !
   ! TO DO: Add an option to instead directly compare lattices of the same size with different spectral cuts
-  subroutine initialize_vacuum_fluctuations(fld,len,m2,kmax,phi0,klat,discrete)
+  subroutine initialize_vacuum_fluctuations(fld,len,phi0,m2,kcut,k_split,discrete)
     real(dl), dimension(:,:), intent(inout) :: fld
-    real(dl), intent(in) :: len, m2
-    integer, intent(in), optional :: kmax, klat
-    real(dl), intent(in), optional :: phi0
+    real(dl), intent(in) :: len, phi0, m2
+    integer, intent(in), optional :: kcut, k_split
     logical, intent(in), optional :: discrete
 
     real(dl), dimension(1:size(fld(:,1))) :: df
     real(dl), dimension(1:size(fld(:,1))/2+1) :: spec, w2eff
-    integer :: km, kc
+    integer :: kcut_, k_split_
     integer :: i, nn, nl
     real(dl) :: phiL, norm
     logical :: disc
 
     nn = size(spec); nl = size(fld(:,1))
-    km = size(spec); if (present(kmax)) km = kmax
-    kc = size(spec); if (present(klat)) kc = klat
-    phiL = twopi; if (present(phi0)) phiL = phi0
+    phiL = phi0
+    kcut_ = size(spec); if (present(kcut)) kcut_ = kcut
+    k_split_ = size(spec); if (present(k_split)) k_split_ = k_split
     disc = .false.; if (present(discrete)) disc = discrete
     
     norm = (0.5_dl)**0.5 / phiL / sqrt(len) ! Assumes deviates have unit complex norm
@@ -144,17 +158,18 @@ contains
        enddo
     else
        do i=1,nn
-          w2eff(i) = m2 + 4._dl*(dble(nl)**2/len**2)*sin(0.25_dl*twopi*dble(i-1)/dble(nn-1))**2  ! Check this for odd lattices, specifically the n, and nn-1 stuff
+          ! Check this for odd lattices, specifically the n, and nn-1 stuff
+          w2eff(i) = m2 + 4._dl*(dble(nl)**2/len**2)*sin(0.25_dl*twopi*dble(i-1)/dble(nn-1))**2
        enddo
     endif
 
     spec = 0._dl
     spec(2:) = norm / w2eff(2:)**0.25
-    call generate_1dGRF(df,spec(1:km),.false.,initStride=kc)
+    call generate_1dGRF(df,spec(1:kcut_),.false.,initStride=k_split_)
     fld(:,1) = fld(:,1) + df(:)
 
     spec = spec * w2eff**0.5
-    call generate_1dGRF(df,spec(1:km),.false.,initStride=kc)
+    call generate_1dGRF(df,spec(1:kcut_),.false.,initStride=k_split_)
     fld(:,2) = fld(:,2) + df(:)
   end subroutine initialize_vacuum_fluctuations
   
