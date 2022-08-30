@@ -29,7 +29,7 @@ def decays_from_dat(dat,sigCut=-10,full=False):
     mu, sig = get_means_and_sigma(dat)
     th = mu + sigCut*sig
     if full:
-        return [extract_decay_times_full(dc[:,:,1],dt=dc[0,0,0],interp=True,thresh=th,cut=th) for dc in d]
+        return [extract_decay_times_full(dc[:,:,1],dt=dc[0,0,0],interp=True,thresh=th[i],cut=th[i]) for i,dc in enumerate(d)]
     return [extract_decay_times(dc[:,:,1],dt=dc[0,0,0],interp=True,thresh=th,cut=th) for dc in d]
         
 # Move this into plotting file
@@ -186,6 +186,8 @@ def decay_indices(t1,t2):
 def ind_count(t0,t1,ind,thresh):
     """
     Input: 
+      t0     - Time-stream #1
+      t1     - Time-stream #2
       ind    - The indices where both ensembles decay, one does and the other doesn't, and neither do.  In the form of the output of decay_indices
       thresh - Threshold dt for which two decaying trajectories are determined to not match
 
@@ -197,14 +199,24 @@ def ind_count(t0,t1,ind,thresh):
     n_error = np.where(np.abs(t0[ind[0]]-t1[ind[0]]) > thresh)[0].size
     return n, n_error
 
+def plot_decay_time_diffs(t0,t1,ind):
+    """
+    Given two time streams, and the indices returned by decay_indices,
+    plot the distribution of time-differences (when they both decay)
+    """
+    f,a = plt.subplots()
+
+    a.hist(t1[ind[0]]-t0[ind[0]])
+    return f,a
+
 def error_prob(t_bad,t_res,thresh=0.5):
     """
-    Return the fraction of 'bad' decay times given an unresolved and compared resolved simulation
+    Return the fraction of 'bad' decay times given an unresolved and resolved simulation
 
     Input:
-      t_bad : Decay times (including undecayed) times for unresolved sims
-      t_res : Decay times for resolved simulations
-      thresh : Error in dt to be considered a bad decay time
+      t_bad  : Decay times (including undecayed) times for unresolved sims
+      t_res  : Decay times for resolved simulations
+      thresh : Difference in t_bad and t_res to be considered a bad decay time
 
     Output:
       Fraction of bad decay times defined as:
@@ -216,6 +228,14 @@ def error_prob(t_bad,t_res,thresh=0.5):
 
 # Return the distribution of decay trajectories
 def decay_frac_dist(times):
+    """
+    Return the distribution of decay trajectories.
+
+    Input:
+    
+    TO DO : Figure out what the hell this is actually doing
+
+    """
     uv_ax = 1; ir_ax = 0
     nIR = times.shape[ir_ax]; nUV = times.shape[uv_ax]
     nDecay = np.sum(times >= 0.,axis=uv_ax) # Check the axes are correct
@@ -224,21 +244,17 @@ def decay_frac_dist(times):
     return nDecay, decayDist
 
 def vary_uv_stats(times):
+    uv_ax = 1; ir_ax = 0
     # First, extract only the trajectories that all decay
-    nDecay = np.sum(times >= 0., axis=1)
+    nDecay = np.sum(times >= 0., axis=uv_ax)
     ii_decay = np.where(nDecay==nUV)
     ii_survive = np.where(nDecay==0)
     # Now get variance, etc. for the decayed trajectories
     s = np.std(times[ii_decay],axis=-1)
     d = np.max(times[ii_decay],axis=-1)-np.min(times[ii_decay],axis=-1)
-    return s,d
-
-def bin_decay_times():
-    """
-    When this is written, I will slice and dice the decay times for identical
-    choices of simulations
-    """
-    return
+    tMean = np.mean(times[ii_decay],axis=-1)
+    dd = np.max( np.abs(times[ii_decay]-tMean[:,np.newaxis]),axis=-1 )
+    return s,d,dd
 
 # To do: Debug more to ensure all offsets are correct.
 # I've done a first go through and I think they're ok
@@ -268,16 +284,26 @@ if __name__=="__main__":
 #    fName = 'files-cut-pairs.txt'
 #    fName = 'files-cut-base-to-converged.txt'
 #    fName = 'files-check-converged-pairs.txt'
-    fName = 'files-vary-kir-fix-nrat.txt'
-    
+#    fName = 'files-vary-kir-fix-nrat.txt'
+#    fName = '/Users/jbraden/Work/Data/vary_kcut/dx_25o512/lambda_1.2/len_100/kc_2/files.txt'
+    fName = 'files_test.txt'
     with open(fName) as f:
         files = f.read().splitlines()
-        
     d = [read_mean_field(f) for f in files]
     mu,sig = get_means_and_sigma(d)
-    nsig = -10; th = mu+nsig*sig
-
+    th = mu-10*sig
     tf = [ extract_decay_times_full(dc[:,:,1],dt=dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
+    
+    #basedir = '/Users/jbraden/Work/Data/vary_kcut/dx_25o512/lambda_1.2/len_100/kc_2/'
+    #with open(fName) as f:
+    #    files = f.read().splitlines()
+    #d = [read_mean_field(basedir+f) for f in files]
+
+#    d = [read_mean_field(f) for f in files]
+#    mu,sig = get_means_and_sigma(d)
+#    nsig = -10; th = mu+nsig*sig
+
+#    tf = [ extract_decay_times_full(dc[:,:,1],dt=dc[0,0,0],thresh=th[i],cut=th[i]).reshape((100,20)) for i,dc in enumerate(d) ]
 #    t = [ extract_decay_times(dc[:,:,1],dt=dc[0,0,0],thresh=th[i],cut=th[i]) for i,dc in enumerate(d) ]
 #    for i in range(3):
 #        print( error_prob(tf[2*i],tf[2*i+1]) )

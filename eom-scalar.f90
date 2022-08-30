@@ -25,7 +25,7 @@ module eom
   real(dl), pointer :: time
 
   real(dl) :: len, dx, dk
-  real(dl) :: lambda, m2
+  real(dl) :: lambda, m2eff_
 
 #ifdef FOURIER
   type(transformPair1D) :: tPair
@@ -33,7 +33,7 @@ module eom
   
 contains
 
-  ! Fix the parameter nature above (in particular the declaration of yvec
+  ! Fix the paramter nature above (in particular the declaration of yvec
   subroutine set_lattice_params(n,l,nf)
     integer, intent(in) :: n, nf
     real(dl), intent(in) :: l
@@ -48,28 +48,33 @@ contains
   end subroutine set_lattice_params
 
   ! Add appropriate subroutine calls here to potential derivs, etc. here
-  subroutine set_model_params(lam,m2_)
-    real(dl), intent(in) :: m2_, lam
-    lambda = lam; m2 = m2_
+  subroutine set_model_params(lam,m2)
+    real(dl), intent(in) :: m2, lam
+    lambda = lam;
+    if (lam > 1._dl) then 
+       m2eff_ = m2*(-1._dl+lambda**2)
+    else
+       m2eff_ = m2
+    endif
   end subroutine set_model_params
 
   real(dl) elemental function v(phi)
     real(dl), intent(in) :: phi
-    v = 0.5_dl*m2*phi**2 + 0.25_dl*lambda*phi**4
+    v = cos(phi) + 0.5_dl*lambda**2*sin(phi)**2 - 1._dl
   end function v
 
   real(dl) elemental function vp(phi)
     real(dl), intent(in) :: phi
-    vp = m2*phi + lambda*phi**3
+    vp = -sin(phi) + 0.5_dl*lambda**2*sin(2._dl*phi)
   end function vp
 
   real(dl) elemental function vpp(phi)
     real(dl), intent(in) :: phi
-    vpp = m2 + 3._dl*lambda*phi**2
+    vpp = -cos(phi) + lambda**2*cos(2._dl*phi)
   end function vpp
   
   real(dl) function phi_fv()
-    phi_fv = 0._dl 
+    phi_fv = 0._dl !0.5_dl*twopi
   end function phi_fv
 
   !>@brief
@@ -81,9 +86,9 @@ contains
     real(dl) :: lNorm 
     lNorm = 1._dl/dx**2
 #endif
-    yp(TIND) = 1._dl 
+    yp(TIND) = 1._dl  ! Uncomment to track time as a variable
     yp(FLD) = yc(DFLD)
-    yp(DFLD) = -( m2*yc(FLD) + lambda*yc(FLD)**3 )
+    yp(DFLD) = -( -sin(yc(FLD)) + 0.5_dl*lambda**2*sin(2._dl*yc(FLD)) )
     
 #ifdef DIFF
 #ifdef DISCRETE
