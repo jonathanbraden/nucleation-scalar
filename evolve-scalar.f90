@@ -37,22 +37,18 @@ program Scalar_1D
   real(dl) :: m2eff
   real(dl) :: lamVal
 
-  !  call initialize_rand(87,18)
-  call initialize_rand(81124617,18)
+  call initialize_rand(87,18)
+  !call initialize_rand(81124617,18)
   lamVal = 1.2_dl
   call set_model_params(lamVal,1._dl)
   
-!#ifdef STOCHASTIC
-! This crap is to reproduce Hertzberg's meaningless unconverged results
-!  krat = 1; lrat = 1
-!  ncut = lrat*10+1; n = krat*lrat*22
-!  lSize = lrat*25.*2.**0.5
-
-  lrat = 1
-  lSize = 64._dl*lrat; n = 1024*lrat
+  lrat = 1;  lSize = 64._dl*lrat; n = 128*lrat
   sim%lat_p = make_lattice_params(n,lSize)  
 
-  phi0 = 6.**0.5; m2eff = lamVal**2-1._dl; k_uv = 512; k_ir = k_uv
+  phi0 = sqrt(5.); m2eff = lamVal**2-1.; k_uv = 32; k_ir=k_uv
+
+  !phi0 = 1._dl; m2eff = 2._dl; k_uv = 512; k_ir=k_uv
+  !phi0 = 6.**0.5; m2eff = lamVal**2-1._dl; k_uv = 512; k_ir = k_uv
   !  phi0 = 0.4_dl*twopi; m2eff = 1.2**2-1.; k_uv = 64; k_ir = k_uv
   !phi0 = sqrt(9._dl); m2eff = lamVal**2-1._dl; k_uv = 512*lrat; k_ir = k_uv
   !m2eff = 1.41625  ! phi0 = sqrt(2.5)
@@ -85,13 +81,12 @@ program Scalar_1D
 
 ! Useful for scanning initial conditions
 !  call scan_ics_masses(sim,(/0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.,2.,3.,4.,5.,6.,7.,8.,9.,10.,20.,30.,40.,50.,60.,70.,80.,90.,100./),10000)
-  
-#ifdef SAMPLE_ICS
-  call sample_ics(sim,10000)
-#endif
+
+  ! Initial condition sampling
+  !call sample_ics(sim,10000)
 
 !#ifdef IC_ENSEMBLE
-  nSamp = 3
+  nSamp = 10
   call run_ic_ensemble(sim,nSamp)
 !#endif
   
@@ -158,6 +153,15 @@ contains
     timePar%nout_step = 1
   end function make_time_params_w_lattice
 
+  !>@brief
+  !> Initialise the integrator, setup FFTW, boot MPI, and perform other necessary setup
+  !> before starting the program
+  subroutine setup(nVar)
+    integer, intent(in) :: nVar
+    call init_integrator(nVar)
+    call initialize_transform_1d(tPair,nLat)  ! nonlocality w/ nLat, tPair?
+  end subroutine setup
+  
   !>@brief
   !> Scan over initial condition masses
   subroutine scan_ics_masses(sim,m2_vals,nSamp)
@@ -276,10 +280,13 @@ contains
     ! Open Files
     open(unit=newunit(u1),file='bubble-count.dat')
     call write_bubble_header(u1,sim)
-    
+
+    print*,"Running"
     do i=1,nSamp
-       call initialise_fields_w_sim(fld, sim)
-       !call initialise_fields(fld, sim%spec_p%k_cut, sim%spec_p%phi0, m2=sim%spec_p%m2)
+       !call initialise_fields_w_sim(fld, sim)
+       print*,"Init fields"
+       call initialise_fields(fld, sim%spec_p%k_cut, sim%spec_p%phi0, m2=sim%spec_p%m2)
+       print*,"Done init"
        call time_evolve(sim%time_p%dt, sim%time_p%nstep, sim%time_p%nout_step, out=.true.)
     enddo
   end subroutine run_ic_ensemble
@@ -308,9 +315,11 @@ contains
 
     phi0 = sim%spec_p%phi0; k_ir = sim%spec_p%k_ir; k_uv = sim%spec_p%k_cut
     do i = 1,samp_ir
-       ! Debut this one
-       !call initialise_fields(flds_ir(:,:,i),k_ir,phi0)
-       call initialise_fields_w_sim(flds_ir(:,:,i), sim)
+       call initialise_fields(flds_ir(:,:,i),k_ir,phi0)
+       ! Something like
+       ! sim%spec_p%k_uv = k_ir
+       ! call initialise_fields_w_sim(flds_ir(:,:,i), sim)
+       ! sim%spec_p%k_uv = k_uv
     enddo
     do i = 1,samp_ir
        if (fix_uv_) call initialize_rand(125,912)
@@ -541,18 +550,14 @@ contains
     time = 0; fld(:,1) = mfld0(1) - dfld0(:,1); fld(:,2) = mfld0(2) - dfld0(:,2)
     call time_evolve(dx/alph,int(alph)*nlat*n_cross,64*n_cross)
   end subroutine run_paired_sims
-  
-  !>@brief
-  !> Initialise the integrator, setup FFTW, boot MPI, and perform other necessary setup
-  !> before starting the program
-  subroutine setup(nVar)
-    integer, intent(in) :: nVar
-    call init_integrator(nVar)
-#ifdef FOURIER
-    call initialize_transform_1d(tPair,nLat)  ! nonlocality
-#endif
-  end subroutine setup
 
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !
+  ! File opening output and headers
+  ! Move this to a separate file
+  !
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  
   subroutine open_bubble_file(fn)
     integer, intent(out) :: fn
     logical :: o
@@ -609,6 +614,115 @@ contains
     write(u,*) t, mean_cos(fld(:,1)), energy_density(fld), mean_phi(:), sum(vp(fld(:,1)))/dble(nl), sum((fld(:,1)-mean_phi(1))**2)/dble(nl), sum((fld(:,1)-mean_phi(1))**3)/dble(nl), sum((fld(:,1)-mean_phi(1))**4)/dble(nl) !cos_smoothed(fld(:,1),tPair,n_sm)
   end subroutine write_mean_field_file
 
+! Add smoothing from my other repository
+  subroutine output_fields(fld)
+    real(dl), dimension(:,:), intent(in) :: fld
+    logical :: o; integer :: i
+    integer, save :: oFile
+    real(dl), dimension(1:size(fld(:,1))) :: gsq, gsq_fd
+
+    inquire(file='fields.dat',opened=o)
+    if (.not.o) then
+       open(unit=oFile,file='fields.dat')
+       write(oFile,*) "# Lattice Parameters"
+       write(oFile,*) "# n = ",nLat," dx = ",dx           ! Fix this nonlocality
+       write(oFile,*) "# Time Stepping parameters"
+       write(oFile,*) "# dt = ",dt_, " dt_out = ",dtout_  ! Fix this nonlocality
+       write(oFile,*) "#"
+       write(oFile,*) "# Phi  PhiDot  GradPhi^2 (FD)  V(phi)  GradPhi^2 (Spec) V_quad"
+    endif
+
+    gsq_fd(1) = 0.5_dl*( (fld(nLat,1)-fld(1,1))**2+(fld(2,1)-fld(1,1))**2 )
+    gsq_fd(nLat) = 0.5_dl*( (fld(nLat-1,1)-fld(nLat,1))**2+(fld(nLat,1)-fld(1,1))**2  )
+    gsq_fd(2:nLat-1) = 0.5_dl*( (fld(1:nLat-2,1)-fld(2:nLat-1,1))**2+(fld(3:nLat,1)-fld(2:nlat-1,1))**2 )
+    gsq_fd = gsq_fd / dx**2
+
+    tPair%realSpace(:) = fld(1:nLat,1)
+    call gradsquared_1d_wtype(tPair,dk)
+    gsq(:) = tPair%realSpace(:)
+
+    ! Fix this if I change array orderings
+    do i=1,size(fld(:,1))
+       write(oFile,*) fld(i,:), gsq_fd(i), v(fld(i,1)), gsq(i), 0.5_dl*m2eff*(fld(i,1)-phi_fv())**2 
+    enddo
+    write(oFile,*)
+    
+!    print*,"conservation :", sum(0.5_dl*gsq(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2), sum(0.5_dl*gsq_fd(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2) 
+  end subroutine output_fields
+
+! Add smoothing from my other repository
+  subroutine output_fields_binary(fld)
+    real(dl), dimension(:,:), intent(in) :: fld
+    logical :: o; integer :: i
+    integer, save :: oFile(1:3)
+    real(dl), dimension(1:size(fld(:,1))) :: gsq, gsq_fd
+
+    inquire(file='field.bin',opened=o)
+    if (.not.o) open(unit=newunit(oFile(1)),file='field.bin',access='stream')
+    inquire(file='dfield.bin',opened=o)
+    if (.not.o) open(unit=newunit(oFile(2)),file='dfield.bin',access='stream')
+    inquire(file='grad_en.bin',opened=o)
+    if (.not.o) open(unit=newunit(oFile(3)),file='grad_en.bin',access='stream')
+
+!    gsq_fd(1) = 0.5_dl*( (fld(nLat,1)-fld(1,1))**2+(fld(2,1)-fld(1,1))**2 )
+!    gsq_fd(nLat) = 0.5_dl*( (fld(nLat-1,1)-fld(nLat,1))**2+(fld(nLat,1)-fld(1,1))**2  )
+!    gsq_fd(2:nLat-1) = 0.5_dl*( (fld(1:nLat-2,1)-fld(2:nLat-1,1))**2+(fld(3:nLat,1)-fld(2:nlat-1,1))**2 )
+!    gsq_fd = gsq_fd / dx**2
+
+#ifdef FOURIER
+    tPair%realSpace(:) = fld(1:nLat,1)
+    call gradsquared_1d_wtype(tPair,dk)
+    gsq(:) = tPair%realSpace(:)
+#else
+    gsq(:) = 0._dl
+    !gsq(1) = 0.5_dl*( (fld(nLat,1)-fld(1,1))**2+(fld(2,1)-fld(1,1))**2 )
+!    gsq(nLat) = 0.5_dl*( (fld(nLat-1,1)-fld(nLat,1))**2+(fld(nLat,1)-fld(1,1))**2  )
+!    gsq(2:nLat-1) = 0.5_dl*( (fld(1:nLat-2,1)-fld(2:nLat-1,1))**2+(fld(3:nLat,1)-fld(2:nlat-1,1))**2 )
+!    gsq = gsq / dx**2
+#endif
+
+    write(oFile(1)) fld(:,1)
+    write(oFile(2)) fld(:,2)
+    write(oFile(3)) 0.5_dl*gsq
+  end subroutine output_fields_binary
+
+  
+  !>@brief
+  !> Write a checkpoint file with all information for restarting the simulation.
+  subroutine write_checkpoint(fld,tcur,dx,n)
+    real(dl), intent(in) :: fld(:,:), tcur, dx
+    integer, intent(in) :: n
+
+    integer :: fn, i
+    open(unit=newunit(fn),file='flds.chk')
+    write(fn,*) n, dx, tcur
+    do i=1,n
+       write(fn,*) fld(i,:)
+    enddo
+    close(fn)
+  end subroutine write_checkpoint
+
+  !>@brief
+  !> Read in a previously produced checkpoint file to initialise the simulation.
+  subroutine read_checkpoint(fld,tcur,nLat,fName)
+    real(dl), intent(out) :: fld(:,:), tcur
+    integer, intent(out) :: nLat
+    character(*), intent(in) :: fName
+
+    integer :: fn
+    integer :: i, n
+    real(dl) :: dx, tc
+    
+    open(unit=newunit(fn),file=fName)
+    read(fn,*) n, dx, tc
+    print*,"Reading checkpoint file: N = ",n," dx = ",dx," t = ",tc
+    ! Add a check that n matches the parameter used for the sim
+    do i=1,n
+       read(fn,*) fld(i,:)
+    enddo
+    close(fn)
+  end subroutine read_checkpoint
+  
   ! Move this somewhere more sensible
   function energy_density(fld) result(rho)
     real(dl), dimension(:,:), intent(in) :: fld
@@ -621,13 +735,13 @@ contains
     gsq_fd(nLat) = 0.5_dl*( (fld(nLat-1,1)-fld(nLat,1))**2+(fld(nLat,1)-fld(1,1))**2  )
     gsq_fd(2:nLat-1) = 0.5_dl*( (fld(1:nLat-2,1)-fld(2:nLat-1,1))**2+(fld(3:nLat,1)-fld(2:nlat-1,1))**2 )
     gsq_fd = gsq_fd / dx**2
-#ifdef FOURIER
+!#ifdef FOURIER
     tPair%realSpace(:) = fld(1:nLat,1)
     call gradsquared_1d_wtype(tPair,dk)
     gsq(:) = tPair%realSpace(:)
-#else
-    gsq(:) = 0._dl  ! tPair isn't created unless doing Fourier transforms
-#endif
+!#else
+!    gsq(:) = 0._dl  ! tPair isn't created unless doing Fourier transforms
+!#endif
     
     rho(1) = 0.5_dl*sum(fld(:,2)**2) + 0.5_dl*sum(gsq) + sum(v(fld(:,1)))
     rho(2) = 0.5_dl*sum(fld(:,2)**2) + 0.5_dl*sum(gsq_fd) + sum(v(fld(:,1)))
@@ -786,7 +900,7 @@ contains
     fld(:,1) = phi_fv()
     fld(:,2) = 0._dl
   end subroutine initialise_mean_fields
-
+  
   !!!! Fix this thing up
   !>@brief
   !> Initialise the field fluctuations
@@ -806,112 +920,6 @@ contains
     fld(:,2) = fld(:,2) + amp*df(:)
   end subroutine initialise_new_fluctuations
   
-! Add smoothing from my other repository
-  subroutine output_fields(fld)
-    real(dl), dimension(:,:), intent(in) :: fld
-    logical :: o; integer :: i
-    integer, save :: oFile
-    real(dl), dimension(1:size(fld(:,1))) :: gsq, gsq_fd
-
-    inquire(file='fields.dat',opened=o)
-    if (.not.o) then
-       open(unit=oFile,file='fields.dat')
-       write(oFile,*) "# Lattice Parameters"
-       write(oFile,*) "# n = ",nLat," dx = ",dx           ! Fix this nonlocality
-       write(oFile,*) "# Time Stepping parameters"
-       write(oFile,*) "# dt = ",dt_, " dt_out = ",dtout_  ! Fix this nonlocality
-       write(oFile,*) "#"
-       write(oFile,*) "# Phi  PhiDot  GradPhi^2 (FD)  V(phi)  GradPhi^2 (Spec) V_quad"
-    endif
-
-    gsq_fd(1) = 0.5_dl*( (fld(nLat,1)-fld(1,1))**2+(fld(2,1)-fld(1,1))**2 )
-    gsq_fd(nLat) = 0.5_dl*( (fld(nLat-1,1)-fld(nLat,1))**2+(fld(nLat,1)-fld(1,1))**2  )
-    gsq_fd(2:nLat-1) = 0.5_dl*( (fld(1:nLat-2,1)-fld(2:nLat-1,1))**2+(fld(3:nLat,1)-fld(2:nlat-1,1))**2 )
-    gsq_fd = gsq_fd / dx**2
-#ifdef FOURIER
-    tPair%realSpace(:) = fld(1:nLat,1)
-    call gradsquared_1d_wtype(tPair,dk)
-    gsq(:) = tPair%realSpace(:)
-#else
-    gsq(:) = 0._dl  ! tPair isn't created unless doing Fourier transforms
-#endif
-    ! Fix this if I change array orderings
-    do i=1,size(fld(:,1))
-       write(oFile,*) fld(i,:), gsq_fd(i), v(fld(i,1)), gsq(i), 0.5_dl*m2eff*(fld(i,1)-phi_fv())**2 
-    enddo
-    write(oFile,*)
-    
-!    print*,"conservation :", sum(0.5_dl*gsq(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2), sum(0.5_dl*gsq_fd(:)+v(fld(:,1))+0.5_dl*fld(:,2)**2) 
-  end subroutine output_fields
-
-! Add smoothing from my other repository
-  subroutine output_fields_binary(fld)
-    real(dl), dimension(:,:), intent(in) :: fld
-    logical :: o; integer :: i
-    integer, save :: oFile(1:3)
-    real(dl), dimension(1:size(fld(:,1))) :: gsq, gsq_fd
-
-    inquire(file='field.bin',opened=o)
-    if (.not.o) open(unit=newunit(oFile(1)),file='field.bin',access='stream')
-    inquire(file='dfield.bin',opened=o)
-    if (.not.o) open(unit=newunit(oFile(2)),file='dfield.bin',access='stream')
-    inquire(file='grad_en.bin',opened=o)
-    if (.not.o) open(unit=newunit(oFile(3)),file='grad_en.bin',access='stream')
-
-!    gsq_fd(1) = 0.5_dl*( (fld(nLat,1)-fld(1,1))**2+(fld(2,1)-fld(1,1))**2 )
-!    gsq_fd(nLat) = 0.5_dl*( (fld(nLat-1,1)-fld(nLat,1))**2+(fld(nLat,1)-fld(1,1))**2  )
-!    gsq_fd(2:nLat-1) = 0.5_dl*( (fld(1:nLat-2,1)-fld(2:nLat-1,1))**2+(fld(3:nLat,1)-fld(2:nlat-1,1))**2 )
-!    gsq_fd = gsq_fd / dx**2
-#ifdef FOURIER
-    tPair%realSpace(:) = fld(1:nLat,1)
-    call gradsquared_1d_wtype(tPair,dk)
-    gsq(:) = tPair%realSpace(:)
-#else
-    gsq(:) = 0._dl  ! tPair isn't created unless doing Fourier transforms
-#endif
-
-    write(oFile(1)) fld(:,1)
-    write(oFile(2)) fld(:,2)
-    write(oFile(3)) 0.5_dl*gsq
-  end subroutine output_fields_binary
-
-  
-  !>@brief
-  !> Write a checkpoint file with all information for restarting the simulation.
-  subroutine write_checkpoint(fld,tcur,dx,n)
-    real(dl), intent(in) :: fld(:,:), tcur, dx
-    integer, intent(in) :: n
-
-    integer :: fn, i
-    open(unit=newunit(fn),file='flds.chk')
-    write(fn,*) n, dx, tcur
-    do i=1,n
-       write(fn,*) fld(i,:)
-    enddo
-    close(fn)
-  end subroutine write_checkpoint
-
-  !>@brief
-  !> Read in a previously produced checkpoint file to initialise the simulation.
-  subroutine read_checkpoint(fld,tcur,nLat,fName)
-    real(dl), intent(out) :: fld(:,:), tcur
-    integer, intent(out) :: nLat
-    character(*), intent(in) :: fName
-
-    integer :: fn
-    integer :: i, n
-    real(dl) :: dx, tc
-    
-    open(unit=newunit(fn),file=fName)
-    read(fn,*) n, dx, tc
-    print*,"Reading checkpoint file: N = ",n," dx = ",dx," t = ",tc
-    ! Add a check that n matches the parameter used for the sim
-    do i=1,n
-       read(fn,*) fld(i,:)
-    enddo
-    close(fn)
-  end subroutine read_checkpoint
-
   subroutine initialise_from_file(fName,n)
     character(*), intent(in) :: fName
     integer, intent(in) :: n

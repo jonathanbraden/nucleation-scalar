@@ -6,13 +6,6 @@ module Fluctuations
 
   implicit none 
 
-!  type SpecParams
-!     real(dl) :: phi0, m2
-!     integer :: k_ir, k_cut
-!     integer :: type = 1
-!  end type SpecParams
-! When I uncomment the above, also add the spectrum creation subroutine
-  
 contains
 
   ! Add preprocessor for array ordering in case I change it
@@ -87,20 +80,6 @@ contains
     real(dl), dimension(:,:), intent(inout) :: fld
   end subroutine initialize_bogoliubov_fluctuations
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!
-! Subroutines for constrained fluctuations
-!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  !>@brief
-  !> Resample fluctuations outside of the specified band
-  subroutine constrained_fluctuations(fld,imin,imax,ns)
-    real(dl), dimension(:,:), intent(inout) :: fld
-    integer, intent(in) :: imin, imax, ns
-
-    real(dl), dimension(1:size(fld(:,1))/2+1) :: spec
-  end subroutine constrained_fluctuations
-
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
 ! These have been combined into the single function above
@@ -145,6 +124,7 @@ contains
     logical :: disc
 
     nn = size(spec); nl = size(fld(:,1))
+    
     phiL = phi0
     kcut_ = size(spec); if (present(kcut)) kcut_ = kcut
     k_split_ = size(spec); if (present(k_split)) k_split_ = k_split

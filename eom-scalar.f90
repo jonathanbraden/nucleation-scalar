@@ -11,12 +11,10 @@
 #include "macros.h"
 #include "fldind.h"
 
-
 module eom
   use constants
-#ifdef FOURIER
   use fftw3
-#endif
+  
   implicit none
 
   integer :: nLat, nFld, nVar
@@ -26,10 +24,7 @@ module eom
 
   real(dl) :: len, dx, dk
   real(dl) :: lambda, m2eff_
-
-#ifdef FOURIER
   type(transformPair1D) :: tPair
-#endif
   
 contains
 
